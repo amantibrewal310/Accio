@@ -260,6 +260,21 @@ Found while polishing the stand-in icon:
 - `AXPress` on a **hidden** app's item opens its menu straight away, without showing the item: the menu
   hangs from the item's last on-screen position (Maccy: AX frame 1063+34 while hidden, menu at x 1020).
 
+Found while building the Bar (Phase 3):
+
+- Items that don't fit are stacked on the overflow chevron in **both** trees: MenuBarAgent lists a few
+  of them at the chevron's x (overlapping frames), and the app's own `AXExtrasMenuBar` reports all of
+  them at about the same x. So an app's undrawn items can't be told apart by frame; Accio matches the
+  drawn ones by frame (MenuBarAgent and the app agree within ~2 pt) and takes the rest in order.
+  Tested with a 9-item test app: 3/3 clicks in the Bar opened distinct undrawn items.
+- `AXPress` works on overflowing items too, and on hidden Apple-allow-listable items Accio uses a
+  temporary allow-list entry: Bluetooth hidden → shown, clicked, menu opened, hidden again after the
+  menu closed.
+- Some Apple items exist only in some states (Focus wasn't in the bar even with nothing hidden). Accio
+  notes which Apple items are missing whenever everything is shown, and leaves those out of the Bar.
+- A synthetic scroll or mouse-moved event at the menu bar reaches global `NSEvent` monitors, so hover
+  and swipe triggers can be tested with `CGEvent`s.
+
 ## Implications for the plan
 
 - **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs 0–8,

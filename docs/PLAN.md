@@ -133,7 +133,22 @@ Original plan:
 - Stable item identity across launches (bundle ID + item title/index heuristics; handle apps with multiple items).
 - Onboarding flow for Accessibility (required for moving/clicking) and Screen Recording (optional).
 
-### Phase 3 — The Bar (2–3 weeks)
+### Phase 3 — The Bar (2–3 weeks) ✅ done, adapted to macOS 27
+
+As built: `BarController` shows a non-activating panel hanging from Accio's icon (right edges aligned),
+with app icons and SF Symbols (hidden items can't be captured on 27). Two modes (Settings → General):
+hidden items show **in the menu bar** (default), with revealed items that don't fit (behind the notch
+or stacked on the overflow chevron) going to the Bar automatically ("notch mode"), or **in the Bar**,
+leaving the menu bar alone. `ItemOpener` opens items: `AXPress` / `AXShowMenu` for apps' items, even
+hidden ones; Apple's items are shown for a moment (added to the allow-list, or shown alone when they
+don't fit), clicked, and hidden again once their menu closes. Optional triggers: resting the pointer on
+empty menu bar space, and swiping down/up on the menu bar. Esc, outside clicks and the rehide delay
+close the Bar; ←/→ and Return work in it. Main display only for now.
+
+Not done: multi-display (Accio only manages the main display's menu bar so far), and per-item titles
+in the Bar (apps with several items show the same icon for each).
+
+Original plan:
 - Borderless, non-activating `NSPanel` below the menu bar, aligned to the Accio icon or screen edge (setting).
 - Shows Hidden (+ optionally Always Hidden) items as captured images; without Screen Recording, falls back to app icon + name.
 - Click / right-click / ⌥-click forwarding via `ClickForwarder`; the item's own menu must appear in the right place.

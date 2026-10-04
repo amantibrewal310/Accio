@@ -55,6 +55,11 @@ final class StandInIcon {
         }
     }
 
+    /// Where the icon is, while it's shown.
+    var visibleFrame: NSRect? {
+        panel.isVisible ? panel.frame : nil
+    }
+
     var image: NSImage? {
         get { button.image }
         set { button.image = newValue }

@@ -17,6 +17,9 @@ final class VisibilityController: ObservableObject {
     var isAvailable: Bool { hider != nil }
 
     var onRevealChange: (@MainActor (Bool) -> Void)?
+    /// After revealing in the menu bar, with the revealed items that don't
+    /// fit (behind the notch or the overflow chevron); empty if all fit.
+    var onOverflow: (@MainActor ([MenuBarItem]) -> Void)?
     /// Called after every apply, with whether items are being hidden now.
     var onHidingChange: (@MainActor (Bool) -> Void)?
 
@@ -25,6 +28,9 @@ final class VisibilityController: ObservableObject {
     private let registry = ItemRegistry.shared
     /// While ItemMover drags an item, everything is shown.
     private var isMoving = false
+    /// An item shown for a moment so it can be clicked (`ItemOpener`);
+    /// `alone` when it doesn't fit next to the others.
+    private var temporary: (item: MenuBarItem, alone: Bool)?
     private var rehideTimer: Timer?
     private var clickMonitor: Any?
     private var observers: [NSObjectProtocol] = []
@@ -43,7 +49,7 @@ final class VisibilityController: ObservableObject {
             for _ in 0..<20 where MenuBarItems.isTrusted && MenuBarItems.ownItemFrame() == nil {
                 try? await Task.sleep(for: .milliseconds(50))
             }
-            registry.update(visible: MenuBarItems.visible(includingOwn: true))
+            registry.update(visible: MenuBarItems.visible(includingOwn: true), everythingShown: true)
             apply()
             rescan()
         }
@@ -64,10 +70,12 @@ final class VisibilityController: ObservableObject {
         scheduleRehide()
         updateClickMonitor()
         onRevealChange?(true)
-        // Revealed items are drawn again: note where they are once they've faded in.
+        // Revealed items are drawn again: note where they are once they've
+        // faded in, and whether they fit.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(1300))
-            if self.isRevealed { self.rescan() }
+            guard self.isRevealed else { return }
+            self.rescan { if self.isRevealed { self.checkOverflow() } }
         }
     }
 
@@ -107,6 +115,31 @@ final class VisibilityController: ObservableObject {
         }
     }
 
+    /// Show `item` until `endTemporary()`, so it can be clicked.
+    func showTemporarily(_ item: MenuBarItem, alone: Bool) {
+        temporary = (item, alone)
+        apply()
+    }
+
+    func endTemporary() {
+        guard temporary != nil else { return }
+        temporary = nil
+        apply()
+    }
+
+    /// Revealed items that aren't drawn, reported through `onOverflow`.
+    private func checkOverflow() {
+        let visible = MenuBarItems.visible()
+        let drawn = Set(visible.map(\.item.id)).subtracting(MenuBarItems.undrawnIDs(in: visible))
+        let listed = Set(visible.map(\.item.id))
+        let overflow = registry.items.filter { item in
+            guard !item.isAccio, staysVisible(item), registry.isRunning(item), !drawn.contains(item.id) else { return false }
+            // Apple's items come and go on their own; only count listed ones.
+            return item.bundleID != nil || listed.contains(item.id)
+        }
+        onOverflow?(overflow)
+    }
+
     func beginMove() {
         isMoving = true
         apply()
@@ -123,7 +156,7 @@ final class VisibilityController: ObservableObject {
         case .rehide:
             if isRevealed { scheduleRehide() }
             updateClickMonitor()
-        case .shortcut: break
+        case .shortcut, .reveal: break
         }
     }
 
@@ -134,6 +167,12 @@ final class VisibilityController: ObservableObject {
     /// `nil` when nothing needs hiding: holding an assertion also hides Focus
     /// and other unlisted Apple items, so don't hold one without a reason.
     private func allowList() -> MenuBarHider.AllowList? {
+        let own = Bundle.main.bundleIdentifier ?? MenuBarItem.accio.bundleID!
+        if let temporary, temporary.alone {
+            let item = temporary.item
+            guard item.bundleID != nil || item.systemItem != nil else { return nil }
+            return .init(bundleIDs: Set([own, item.bundleID].compactMap { $0 }), systemItems: Set([item.systemItem].compactMap { $0 }))
+        }
         var hiddenApps = preferences.alwaysHiddenApps
         var hiddenSystemItems = preferences.alwaysHiddenSystemItems
         switch revealLevel {
@@ -146,8 +185,15 @@ final class VisibilityController: ObservableObject {
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
         guard !hiddenSystemItems.isEmpty || !running.isDisjoint(with: hiddenApps) else { return nil }
         var bundleIDs = running.subtracting(hiddenApps)
-        if let own = Bundle.main.bundleIdentifier { bundleIDs.insert(own) }
-        return .init(bundleIDs: bundleIDs, systemItems: Set(SystemItem.allCases).subtracting(hiddenSystemItems))
+        var systemItems = Set(SystemItem.allCases).subtracting(hiddenSystemItems)
+        bundleIDs.insert(own)
+        if let temporary {
+            // Apple items the API can't name (Focus) only show without an assertion.
+            if case .system = temporary.item.owner, temporary.item.systemItem == nil { return nil }
+            if let bundleID = temporary.item.bundleID { bundleIDs.insert(bundleID) }
+            if let systemItem = temporary.item.systemItem { systemItems.insert(systemItem) }
+        }
+        return .init(bundleIDs: bundleIDs, systemItems: systemItems)
     }
 
     // MARK: Rehide
@@ -204,17 +250,19 @@ final class VisibilityController: ObservableObject {
         rescan()
     }
 
-    /// Refresh the item registry in the background.
-    func rescan() {
+    /// Refresh the item registry in the background, then call `completion`.
+    func rescan(then completion: (@MainActor () -> Void)? = nil) {
         guard MenuBarItems.isTrusted else { return }
         scanTask?.cancel()
+        let everythingShown = hider.map { !$0.isHiding } ?? true
         scanTask = Task { @MainActor in
             let (visible, apps) = await Task.detached(priority: .utility) {
                 (MenuBarItems.visible(includingOwn: true), MenuBarItems.apps())
             }.value
             guard !Task.isCancelled else { return }
-            registry.update(visible: visible)
+            registry.update(visible: visible, everythingShown: everythingShown && !(hider?.isHiding ?? false))
             registry.update(apps: apps)
+            completion?()
         }
     }
 

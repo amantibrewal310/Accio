@@ -21,6 +21,23 @@ enum ItemSection: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Where hidden items appear when the user asks for them.
+enum RevealMode: String, CaseIterable, Identifiable, Sendable {
+    /// In the menu bar itself; items that don't fit go to the Bar.
+    case menuBar
+    /// In the Bar, a panel below the menu bar; the menu bar stays as it is.
+    case bar
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .menuBar: "In the menu bar"
+        case .bar: "In a bar below the menu bar"
+        }
+    }
+}
+
 /// Everything the user chooses, persisted in UserDefaults. Changes apply
 /// immediately (no Apply button).
 @MainActor
@@ -30,7 +47,7 @@ final class Preferences: ObservableObject {
     private let defaults = UserDefaults.standard
     var onChange: (@MainActor (Change) -> Void)?
 
-    enum Change { case visibility, shortcut, rehide }
+    enum Change { case visibility, shortcut, rehide, reveal }
 
     /// Bundle IDs of apps in the Hidden section. New apps are shown.
     @Published private(set) var hiddenApps: Set<String> {
@@ -65,6 +82,20 @@ final class Preferences: ObservableObject {
         didSet { save(rehidesOnOutsideClick, Key.rehidesOnOutsideClick); onChange?(.rehide) }
     }
 
+    @Published var revealMode: RevealMode {
+        didSet { save(revealMode.rawValue, Key.revealMode); onChange?(.reveal) }
+    }
+
+    /// Show hidden items when the pointer rests on empty menu bar space.
+    @Published var revealsOnHover: Bool {
+        didSet { save(revealsOnHover, Key.revealsOnHover); onChange?(.reveal) }
+    }
+
+    /// Swipe or scroll down on the menu bar to show hidden items, up to hide them.
+    @Published var revealsOnScroll: Bool {
+        didSet { save(revealsOnScroll, Key.revealsOnScroll); onChange?(.reveal) }
+    }
+
     static let rehideDelays = [5, 10, 15, 30, 60, 0]
 
     private enum Key {
@@ -75,6 +106,9 @@ final class Preferences: ObservableObject {
         static let revealShortcut = "RevealShortcut"
         static let rehideDelay = "RehideDelay"
         static let rehidesOnOutsideClick = "RehidesOnOutsideClick"
+        static let revealMode = "RevealMode"
+        static let revealsOnHover = "RevealsOnHover"
+        static let revealsOnScroll = "RevealsOnScroll"
     }
 
     private init() {
@@ -86,6 +120,9 @@ final class Preferences: ObservableObject {
         revealShortcut = defaults.string(forKey: Key.revealShortcut).map(Shortcut.init(rawValue:)) ?? .defaultReveal
         rehideDelay = defaults.object(forKey: Key.rehideDelay) as? Int ?? 10
         rehidesOnOutsideClick = defaults.object(forKey: Key.rehidesOnOutsideClick) as? Bool ?? true
+        revealMode = defaults.string(forKey: Key.revealMode).flatMap(RevealMode.init(rawValue:)) ?? .menuBar
+        revealsOnHover = defaults.bool(forKey: Key.revealsOnHover)
+        revealsOnScroll = defaults.bool(forKey: Key.revealsOnScroll)
     }
 
     /// Accepts strings too, as written by `defaults write … -array 0 1`.

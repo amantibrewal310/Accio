@@ -43,7 +43,23 @@ private struct GeneralView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Show hidden items") {
+                Picker("Show hidden items", selection: $preferences.revealMode) {
+                    ForEach(RevealMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                Toggle("Show when the pointer rests on empty menu bar space", isOn: $preferences.revealsOnHover)
+                Toggle("Swipe down on the menu bar to show, up to hide", isOn: $preferences.revealsOnScroll)
+            } footer: {
+                Text(preferences.revealMode == .menuBar
+                    ? "Items that don't fit next to the notch appear in a bar below the menu bar. Click one to open it."
+                    : "The menu bar stays as it is. Click an item in the bar to open it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                LabeledContent("Keyboard shortcut") {
                     ShortcutRecorder(shortcut: $preferences.revealShortcut)
                 }
                 Picker("Hide again after", selection: $preferences.rehideDelay) {
@@ -53,7 +69,7 @@ private struct GeneralView: View {
                 }
                 Toggle("Hide again when clicking outside the menu bar", isOn: $preferences.rehidesOnOutsideClick)
             } footer: {
-                Text("Click the wand to show or hide Hidden items, ⌥-click it to show Always Hidden items too. Right-click it for the menu.")
+                Text("Click the wand to show or hide Hidden items, ⌥-click it to show Always Hidden items too. Right-click it for the menu. Hidden items in the bar close the same way.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

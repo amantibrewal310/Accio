@@ -43,6 +43,17 @@ struct MenuBarItem: Identifiable, Hashable, Sendable {
     }()
 
     var isAccio: Bool { id == Self.accio.id }
+
+    /// The item's place among its app's items, left to right.
+    var appIndex: Int {
+        id.split(separator: "#").last.flatMap { Int($0) } ?? 0
+    }
+
+    /// SF Symbol standing in for Apple's items, which have no app icon.
+    var symbolName: String? {
+        guard case .system(let identifier) = owner else { return nil }
+        return systemItem?.symbol ?? (identifier.hasSuffix("focusmode") ? "moon.fill" : "menubar.rectangle")
+    }
 }
 
 /// An item that is drawn in the menu bar right now.
@@ -134,6 +145,29 @@ enum MenuBarItems {
                 frame: slot.frame
             )
         }
+    }
+
+    /// The notch on the main display, in global top-left coordinates.
+    @MainActor
+    static func notchRect() -> CGRect? {
+        guard let screen = NSScreen.screens.first,
+              let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea
+        else { return nil }
+        return CGRect(x: screen.frame.minX + left.maxX, y: 0, width: right.minX - left.maxX, height: left.height)
+    }
+
+    /// Listed items that aren't really drawn: behind the notch, or stacked
+    /// on the overflow chevron with others because they don't fit.
+    @MainActor
+    static func undrawnIDs(in visible: [VisibleItem]) -> Set<String> {
+        let notch = notchRect()
+        var ids = Set<String>()
+        for item in visible {
+            let behindNotch = notch.map { $0.intersects(item.frame) } ?? false
+            let stacked = visible.contains { $0.item.id != item.item.id && $0.frame.intersection(item.frame).width > 2 }
+            if behindNotch || stacked { ids.insert(item.item.id) }
+        }
+        return ids
     }
 
     /// Where Accio's own status item is drawn, while it's drawn.
@@ -241,6 +275,12 @@ enum AX {
         AXValueGetValue(position as! AXValue, .cgPoint, &point)
         AXValueGetValue(size as! AXValue, .cgSize, &extent)
         return CGRect(origin: point, size: extent)
+    }
+
+    static func actions(_ element: AXUIElement) -> [String] {
+        var names: CFArray?
+        guard AXUIElementCopyActionNames(element, &names) == .success else { return [] }
+        return names as? [String] ?? []
     }
 
     static func pid(_ element: AXUIElement) -> pid_t {
