@@ -27,167 +27,10 @@ final class SettingsWindow {
 private struct SettingsView: View {
     var body: some View {
         TabView {
-            Tab("Menu Bar Items", systemImage: "menubar.rectangle") { ItemsView() }
+            Tab("Layout", systemImage: "menubar.rectangle") { LayoutView() }
             Tab("General", systemImage: "gearshape") { GeneralView() }
         }
-        .frame(width: 520, height: 560)
-    }
-}
-
-// MARK: Items
-
-private struct ItemsView: View {
-    @ObservedObject private var controller = VisibilityController.shared
-    @ObservedObject private var preferences = Preferences.shared
-    private let trustPoll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    var body: some View {
-        Form {
-            if !controller.isAvailable {
-                Section {
-                    Label("This version of macOS doesn't let Accio hide menu bar items.", systemImage: "exclamationmark.triangle")
-                }
-            }
-            if !controller.isTrusted {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Accio needs Accessibility access to see which apps have menu bar items, and where they are.", systemImage: "lock")
-                        Text("Hiding works without it, but the list below stays empty until access is granted.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        Button("Grant Access…") { MenuBarApps.requestAccess() }
-                    }
-                }
-            }
-            Section {
-                if rows.isEmpty {
-                    Text(controller.isTrusted ? "Looking for menu bar apps…" : "No apps yet")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(rows) { row in
-                    AppRow(row: row, isHidden: hiddenBinding(row.bundleID))
-                }
-            } header: {
-                Text("Apps")
-            } footer: {
-                Text("Hiding works per app: an app with several icons shows or hides all of them.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Section {
-                ForEach(SystemItem.allCases) { item in
-                    VisibilityPicker(isHidden: systemBinding(item)) {
-                        Label(item.title, systemImage: item.symbol)
-                    }
-                }
-            } header: {
-                Text("Apple")
-            } footer: {
-                Text("Focus and other Apple items not listed here are hidden whenever Accio is hiding something.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .onReceive(trustPoll) { _ in
-            if !controller.isTrusted { controller.refreshTrust() }
-        }
-    }
-
-    /// Running menu bar apps, plus hidden apps that aren't running right now.
-    private var rows: [AppRowModel] {
-        var rows = controller.menuBarApps.map {
-            AppRowModel(bundleID: $0.bundleID, name: $0.name, itemCount: $0.itemCount, isRunning: true)
-        }
-        let running = Set(rows.map(\.bundleID))
-        for bundleID in preferences.hiddenApps where !running.contains(bundleID) {
-            rows.append(AppRowModel(
-                bundleID: bundleID, name: preferences.knownApps[bundleID] ?? bundleID, itemCount: 0, isRunning: false
-            ))
-        }
-        return rows.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-
-    private func hiddenBinding(_ bundleID: String) -> Binding<Bool> {
-        Binding(
-            get: { preferences.hiddenApps.contains(bundleID) },
-            set: { hidden in
-                if hidden { preferences.hiddenApps.insert(bundleID) } else { preferences.hiddenApps.remove(bundleID) }
-            }
-        )
-    }
-
-    private func systemBinding(_ item: SystemItem) -> Binding<Bool> {
-        Binding(
-            get: { !preferences.shownSystemItems.contains(item) },
-            set: { hidden in
-                if hidden { preferences.shownSystemItems.remove(item) } else { preferences.shownSystemItems.insert(item) }
-            }
-        )
-    }
-}
-
-private struct AppRowModel: Identifiable {
-    let bundleID: String
-    let name: String
-    let itemCount: Int
-    let isRunning: Bool
-
-    var id: String { bundleID }
-
-    var subtitle: String? {
-        if !isRunning { return "Not running" }
-        return itemCount > 1 ? "\(itemCount) items" : nil
-    }
-}
-
-private struct AppRow: View {
-    let row: AppRowModel
-    @Binding var isHidden: Bool
-
-    var body: some View {
-        VisibilityPicker(isHidden: $isHidden) {
-            HStack(spacing: 8) {
-                Image(nsImage: AppIcons.icon(for: row.bundleID))
-                    .resizable()
-                    .frame(width: 20, height: 20)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(row.name)
-                    if let subtitle = row.subtitle {
-                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .opacity(row.isRunning ? 1 : 0.6)
-        }
-    }
-}
-
-private struct VisibilityPicker<Label: View>: View {
-    @Binding var isHidden: Bool
-    @ViewBuilder let label: () -> Label
-
-    var body: some View {
-        Picker(selection: $isHidden, content: {
-            Text("Shown").tag(false)
-            Text("Hidden").tag(true)
-        }, label: label)
-        .pickerStyle(.segmented)
-        .fixedSize()
-    }
-}
-
-@MainActor
-private enum AppIcons {
-    private static var cache: [String: NSImage] = [:]
-
-    static func icon(for bundleID: String) -> NSImage {
-        if let icon = cache[bundleID] { return icon }
-        let icon = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-            .map { NSWorkspace.shared.icon(forFile: $0.path) }
-            ?? NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)!
-        cache[bundleID] = icon
-        return icon
+        .frame(width: 560, height: 620)
     }
 }
 
@@ -210,7 +53,7 @@ private struct GeneralView: View {
                 }
                 Toggle("Hide again when clicking outside the menu bar", isOn: $preferences.rehidesOnOutsideClick)
             } footer: {
-                Text("Click the wand to show or hide items. Right-click it for the menu, ⌥-click for Settings.")
+                Text("Click the wand to show or hide Hidden items, ⌥-click it to show Always Hidden items too. Right-click it for the menu.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

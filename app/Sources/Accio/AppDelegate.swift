@@ -31,9 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.start()
         registerHotKey()
 
-        if !MenuBarApps.isTrusted || !UserDefaults.standard.bool(forKey: "HasLaunched") {
+        if !MenuBarItems.isTrusted || !UserDefaults.standard.bool(forKey: "HasLaunched") {
             UserDefaults.standard.set(true, forKey: "HasLaunched")
-            SettingsWindow.shared.show()
+            OnboardingWindow.shared.show()
         }
     }
 
@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         image?.isTemplate = true
         statusItem?.button?.image = image
+        standIn?.image = image
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
@@ -79,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isRightClick || flags.contains(.control) {
             showMenu(from: nil)
         } else if flags.contains(.option) {
-            SettingsWindow.shared.show()
+            // Always Hidden items too; a second ⌥-click hides again.
+            controller.revealLevel == .all ? controller.hide() : controller.reveal(all: true)
         } else {
             controller.toggle()
         }
@@ -97,6 +99,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         toggle.isEnabled = controller.isAvailable
         menu.addItem(toggle)
+        if controller.revealLevel != .all {
+            let all = ClosureMenuItem("Show All Items") { [controller] in controller.reveal(all: true) }
+            all.isEnabled = controller.isAvailable
+            menu.addItem(all)
+        }
         if !controller.isAvailable {
             let note = NSMenuItem(title: "Hiding isn't available on this version of macOS", action: nil, keyEquivalent: "")
             note.isEnabled = false
