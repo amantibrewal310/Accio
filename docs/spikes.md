@@ -13,7 +13,8 @@ Accessibility and Screen Recording granted to the host process.
 | 2 | Enumerate items via window list | ❌ Broken on macOS 27 | No per-item windows exist any more |
 | 2b | Enumerate items via Accessibility | ✅ Works | 115 ms full scan; system items are anonymous |
 | 6 | Notch geometry | ✅ Works | |
-| 1 | Divider hiding | ⚠️ Unverified | Divider resizes, but the visual effect couldn't be confirmed (see below) |
+| 1 | Divider hiding | ❌ Broken on macOS 27 | Oversized item is dropped by the system instead of pushing others off-screen |
+| 1b | Hiding via `MBAssessmentModeAssertion` allow-list | ⏳ In progress | Private API activates successfully from an unentitled process; visual effect not yet confirmed |
 | 3 | Image capture | ⏳ Pending | Needs redesign: no per-item window to capture |
 | 4 | Click forwarding | ⏳ Pending | `AXPress` is the likely route for third-party items |
 | 5 | Reordering (⌘-drag) | ⏳ Pending | |
@@ -51,23 +52,69 @@ Each app's `AXExtrasMenuBar` attribute → children, with `AXPosition` / `AXSize
 `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` give the notch as x 645.5–824.5, height 32 pt.
 Converting to global top-left coordinates works; intersecting with AX item frames is straightforward.
 
-## 1. Divider hiding ⚠️ unverified
+## 1. Divider hiding ❌
 
 Test: a separate `spike dummies --divider` process creates a divider, then D1–D3 (so they sit to its left),
-and toggles the divider via signals while AX is read from outside.
+and toggles the divider via signals. Verified with screenshots (the earlier black captures were because the
+Mac was in full-screen mode, where the menu bar is hidden).
 
-- Divider length change applies (AX width 28 → **5002**: the system caps it, not 10,000) and reverts.
-- D1–D3 positions barely changed, but the bar was already full so they were overflowing to begin with;
-  the result is inconclusive.
-- `screencapture` of the menu bar from this session returns an empty black bar, so visual verification
-  needs a human looking at the screen. **Next: rerun with someone watching, ideally with fewer items
-  in the menu bar.**
+| Before | Divider expanded | Collapsed |
+|---|---|---|
+| `D3 D2 D1 ‖ …` | `D3 D2 D1 …`: the **divider itself vanishes**, D1–D3 slide right | `D3 D2 D1 ‖ …` |
+
+- macOS caps the item (AX width 5002) and then drops it, because macOS 27 removes any item wider than half
+  the display.
+- AX positions are not trustworthy during the change (D1–D3 reported moving slightly *right*).
+
+## How macOS 27 works (from research)
+
+- The whole menu bar is one window drawn by `MenuBarAgent` (`com.apple.MenuBarAgent`).
+- Built-in overflow: when items don't fit (notch, wide app menus), macOS collapses the surplus behind a
+  **"Show Hidden Menu Bar Items"** chevron. Users can't choose which items go there. Items pack from the
+  trailing (right) end; the first one that doesn't fit, and everything left of it, overflows.
+- Collapsed items aren't drawn at all; AX reports them stacked on top of the chevron.
+- Status of others (Oct 2026): Ice broken and unmaintained; Thaw 2.x and Bartender 7 work.
+  Bartender 7 / BetterTouchTool use an undocumented "menu bar layout" approach.
+- **icemelt** (GPL fork of Ice, studied for approach only, no code copied):
+  - Enumerates through **MenuBarAgent's AX tree**: one AX window per display, one child per item slot; the
+    slot's first child is owned by the app that created the item (`AXUIElementGetPid`), so the owner is
+    known without messaging the app. System extras carry identifiers like `com.apple.menuextra.clock`.
+    The chevron is the slot with no child.
+  - Hides by filling the available room with blank spacer `NSStatusItem`s (each under half the display
+    width, positioned via `NSStatusItem Preferred Position <autosaveName>` defaults) so the hidden
+    section is pushed into the system overflow. Fragile: the room changes with every app switch, multi-display
+    is broken, and it flickers.
+  - Clicks with `CGEvent` at the slot centre (opening the chevron first for hidden items). No image capture
+    on 27: uses app icons / SF Symbols. Reorders with synthesised ⌘-drag.
+
+## 1b. `MBAssessmentModeAssertion` ⏳
+
+`/System/Library/PrivateFrameworks/MenuBarClientCore.framework` (Objective-C classes, loadable with
+`dlopen` + `NSClassFromString`):
+
+- `MBAssessmentModeConfiguration initWithAllowedSystemItems:(NSArray<NSNumber>) allowedBundleIdentifiers:(NSArray<NSString>)`
+- `MBAssessmentModeAssertion init`, `activateWithConfiguration:completionHandler:`, `invalidate`
+- Also present: `MBMenuBarItemManager` (`setItems:`, `setGloballyHidden:`, `startMenuTrackingForItemID:`,
+  `navigateInDirection:`…), `MBUtilities getPreferredTrailingItemPositions` / `clearPreferredTrailingItemPositions`.
+
+This looks like the menu bar side of exam ("assessment") mode: **show only an allow-list of items**. If it
+works for us, it is a clean hiding mechanism: allow-list = Accio's Shown section, and invalidating the
+assertion reveals everything.
+
+- Activating it from a plain, unentitled, unsigned process with allow-list `[org.p0deje.Maccy]` returned
+  **success**.
+- Visual effect not yet confirmed (screenshots were taken while the Mac was in full-screen mode).
+- To find out: does it hide the non-allowed items? Does it hide system items too (and which `NSNumber` IDs
+  map to which system item)? Does it have other side effects of exam mode? Is it released when the
+  process exits?
 
 ## Implications for the plan so far
 
 - `ItemDiscovery` must be **Accessibility-based**, not window-based. The `WindowServerClient`
   abstraction in the plan stays, but its first implementation is AX.
 - Accessibility permission becomes **required** for discovery (it was already required for moving/clicking).
-- Item images (Bar, Groups, Search, Show for updates) can no longer capture per-item windows. Options to
-  evaluate in spike 3: capture the `Menubar` window / display region and crop by AX frame (only works
-  for items currently on-screen), or fall back to app icons.
+- Enumeration should read **MenuBarAgent's AX tree** (slots + owner pid), not each app's `AXExtrasMenuBar`.
+- The plan's divider-based Phase 1 doesn't work on macOS 27. Hiding is either the
+  `MBAssessmentModeAssertion` allow-list (if 1b confirms) or icemelt-style spacers into the system overflow.
+- Item images (Bar, Groups, Search, Show for updates) can no longer capture per-item windows. Hidden
+  items aren't drawn at all, so the fallback is app icons / SF Symbols.
