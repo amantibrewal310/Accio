@@ -18,6 +18,7 @@ Accessibility and Screen Recording granted to the host process.
 | 6 | Notch geometry | ✅ Works | `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` |
 | 1 | Divider hiding | ❌ Broken | Oversized item is dropped by the system |
 | 1b | Hiding via `MBAssessmentModeAssertion` | ✅ Works | Allow-list; union of active assertions; crash-safe |
+| 1d | Allow-listing ad-hoc signed apps | ❌ Ignored | Only team-signed apps can be allow-listed, Accio included |
 | 1c | System item IDs | ✅ Mapped | 0–8; Focus not allow-listable |
 | 4 | Click forwarding | ✅ Works | `AXPress` (no cursor move) for apps; CGEvent at slot for system items |
 | 4b | Reveal one hidden app, then open it | ✅ Works | Activate new assertion, then invalidate the old one; no flash |
@@ -120,6 +121,26 @@ Limitations:
 - Private API: Apple could gate it behind an entitlement in any update. Keep the icemelt-style spacer
   approach as a documented fallback.
 - Not tested yet: whether hidden items are still reachable through the system overflow chevron.
+
+## 1d. The allow-list needs a team signature ❌ (found in Phase 1)
+
+While an assertion is active, MenuBarAgent **ignores allow-listed bundle IDs of ad-hoc signed apps**.
+Tested from a separate process, so the assertion holder doesn't matter:
+
+| App in the allow-list | Signature | Stays visible |
+|---|---|---|
+| Maccy (`/Applications`) | Developer ID, team `MN3X4648SC` | ✅ |
+| The same Maccy, copied and re-signed ad-hoc | ad-hoc, no team | ❌ hidden |
+| `Accio.app` (`build/` or `/tmp`, registered with `lsregister`) | ad-hoc | ❌ hidden |
+| A minimal ad-hoc test bundle (`com.accio.dummy`) | ad-hoc | ❌ hidden |
+
+Consequences:
+
+- An ad-hoc build of Accio **hides its own icon** whenever it hides anything. It still works through
+  the hotkey (and Settings opens when Accio is launched again), and Settings says so.
+- Signing with a team identity (Developer ID, or probably a free "Apple Development" certificate) should
+  fix it. Not verified yet.
+- Users' own ad-hoc signed apps (local builds, some Homebrew apps) can't be kept visible while hiding.
 
 ## 2c. MenuBarAgent AX tree ✅
 
