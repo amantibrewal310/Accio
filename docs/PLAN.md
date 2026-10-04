@@ -243,4 +243,6 @@ macOS internals here are undocumented and changed in 26. Before writing the real
 | Build | SwiftPM + `scripts/build.sh` bundle assembly (no Xcode project), same as NotchCove |
 
 Still open:
-1. **Apple Developer account** for signing and notarization (needed by Phase 5).
+1. **Apple Developer account** for signing and notarization (needed by Phase 5). Now also needed for
+   daily use: ad-hoc builds hide their own icon, because the allow-list ignores apps without a team
+   signature (`docs/spikes.md` §1d).
