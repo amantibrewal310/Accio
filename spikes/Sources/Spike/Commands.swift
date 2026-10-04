@@ -121,6 +121,24 @@ enum Commands {
         try? await Task.sleep(for: .milliseconds(800))
         print("dummies pid=\(getpid())")
         fflush(stdout)
+        if let cycle = args.int("cycle"), let divider = items.first, args.flag("divider") {
+            // Human-watchable divider test: alternate every `cycle` seconds.
+            let total = args.int("seconds") ?? 24
+            var hidden = false
+            for _ in 0..<max(total / cycle, 1) {
+                print(hidden
+                    ? "▶ NOW: divider COLLAPSED  → D1 D2 D3 should be VISIBLE"
+                    : "▶ NOW: divider EXPANDED   → D1 D2 D3 should be GONE")
+                fflush(stdout)
+                divider.length = hidden ? NSStatusItem.variableLength : 10_000
+                hidden.toggle()
+                try? await Task.sleep(for: .seconds(cycle))
+            }
+            divider.length = NSStatusItem.variableLength
+            print("done")
+            withExtendedLifetime((items, target, signalSources)) {}
+            return
+        }
         try? await Task.sleep(for: .seconds(args.int("seconds") ?? 120))
         withExtendedLifetime((items, target, signalSources)) {}
     }
