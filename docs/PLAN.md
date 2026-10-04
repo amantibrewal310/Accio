@@ -107,8 +107,11 @@ macOS internals here are undocumented and changed in 26. Before writing the real
 **Exit criteria:** a short written note per primitive: works / works with caveats / doesn't work, and which permission it needs. If 4 or 5 fail, the Bar and the layout editor need a different design. Re-plan before Phase 1.
 
 ### Phase 1 — MVP: hide & reveal (1–2 weeks)
+> Revised after Phase 0 (see `docs/spikes.md`): on macOS 27 the divider trick is gone. Hiding uses the
+> private `MBAssessmentModeAssertion` allow-list, and sections are per app.
 - Agent app (`LSUIElement`), launch at login (`SMAppService`).
-- Accio icon + one divider → **Shown / Hidden** sections. User arranges with ⌘-drag (no custom editor yet).
+- Accio icon + a simple list of menu bar apps (from MenuBarAgent's AX tree) with a Shown / Hidden toggle.
+  Hidden = not in the assertion's allow-list.
 - Reveal by **click** on the icon and by **global hotkey**; auto-rehide after N seconds or on outside click.
 - Persist state; restore correctly across relaunch, sleep/wake, display changes.
 - Minimal SwiftUI Settings: hotkey, rehide delay, launch at login.
