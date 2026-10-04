@@ -55,9 +55,15 @@ final class StandInIcon {
         }
     }
 
-    /// Where the icon is, while it's shown.
-    var visibleFrame: NSRect? {
-        panel.isVisible ? panel.frame : nil
+    /// The icon's view while it's shown, to pop menus up from.
+    var anchorView: NSView? {
+        panel.isVisible ? button : nil
+    }
+
+    /// Drawn pressed while a menu hangs from it, like a status item.
+    var isHighlighted: Bool {
+        get { button.isHighlighted }
+        set { button.isHighlighted = newValue }
     }
 
     var image: NSImage? {
@@ -261,6 +267,7 @@ private final class StandInButton: NSView {
     var tint: NSColor = .labelColor { didSet { if tint != oldValue { needsDisplay = true } } }
     var onClick: ((NSEvent.ModifierFlags) -> Void)?
     var onMenu: (() -> Void)?
+    var isHighlighted = false { didSet { needsDisplay = true } }
     private var isPressed = false { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -268,7 +275,7 @@ private final class StandInButton: NSView {
         // cover the whole button with an invisible fill.
         NSColor.black.withAlphaComponent(0.005).setFill()
         bounds.fill()
-        if isPressed {
+        if isPressed || isHighlighted {
             tint.withAlphaComponent(0.2).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 3), xRadius: 5, yRadius: 5).fill()
         }

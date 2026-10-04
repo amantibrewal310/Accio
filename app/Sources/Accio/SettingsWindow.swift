@@ -53,8 +53,8 @@ private struct GeneralView: View {
                 Toggle("Swipe down on the menu bar to show, up to hide", isOn: $preferences.revealsOnScroll)
             } footer: {
                 Text(preferences.revealMode == .menuBar
-                    ? "Items that don't fit next to the notch appear in a bar below the menu bar. Click one to open it."
-                    : "The menu bar stays as it is. Click an item in the bar to open it.")
+                    ? "If revealed items don't fit next to the notch, Accio lists them in a menu under its icon."
+                    : "The menu bar stays as it is: Accio lists hidden items in a menu under its icon. Hold ⌥ in the menu for a secondary click.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -69,7 +69,7 @@ private struct GeneralView: View {
                 }
                 Toggle("Hide again when clicking outside the menu bar", isOn: $preferences.rehidesOnOutsideClick)
             } footer: {
-                Text("Click the wand to show or hide Hidden items, ⌥-click it to show Always Hidden items too. Right-click it for the menu. Hidden items in the bar close the same way.")
+                Text("Click the wand to show or hide Hidden items, ⌥-click it to show Always Hidden items too. Right-click it for the menu.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

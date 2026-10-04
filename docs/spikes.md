@@ -272,6 +272,11 @@ Found while building the Bar (Phase 3):
   menu closed.
 - Some Apple items exist only in some states (Focus wasn't in the bar even with nothing hidden). Accio
   notes which Apple items are missing whenever everything is shown, and leaves those out of the Bar.
+- Passwords' item accepts `AXPress` while hidden but shows nothing; its popover needs the item on
+  screen. Accio waits ~0.5 s for a menu or popover after a press, and otherwise shows the item for a
+  moment and clicks it.
+- macOS's own overflow chevron (») doesn't open a panel: it redraws the menu bar with the overflowing
+  items over the left side, where the app menus were.
 - A synthetic scroll or mouse-moved event at the menu bar reaches global `NSEvent` monitors, so hover
   and swipe triggers can be tested with `CGEvent`s.
 
