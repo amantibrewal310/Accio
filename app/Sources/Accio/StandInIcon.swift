@@ -42,10 +42,13 @@ final class StandInIcon {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
-        // Not on full-screen spaces, where the menu bar is hidden.
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        // On every Space, full-screen ones too: there it shows while the menu
+        // bar slides down (`isMenuBarShown`).
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
         button = StandInButton()
+        // So its alpha can fade with an auto-hiding menu bar.
+        button.wantsLayer = true
         button.setAccessibilityLabel("Accio")
         panel.contentView = button
         button.onClick = { [weak self] flags in self?.onClick?(flags) }
@@ -58,6 +61,19 @@ final class StandInIcon {
     /// The icon's view while it's shown, to pop menus up from.
     var anchorView: NSView? {
         panel.isVisible ? button : nil
+    }
+
+    /// Follows the menu bar where macOS auto-hides it (full screen): the
+    /// icon fades out with it and doesn't catch clicks meanwhile.
+    var isMenuBarShown = true {
+        didSet {
+            guard isMenuBarShown != oldValue else { return }
+            panel.ignoresMouseEvents = !isMenuBarShown
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.reduceMotion ? 0 : 0.2
+                button.animator().alphaValue = isMenuBarShown ? 1 : 0
+            }
+        }
     }
 
     /// Drawn pressed while a menu hangs from it, like a status item.

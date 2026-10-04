@@ -280,6 +280,18 @@ Found while building the Bar (Phase 3):
 - A synthetic scroll or mouse-moved event at the menu bar reaches global `NSEvent` monitors, so hover
   and swipe triggers can be tested with `CGEvent`s.
 
+Full screen (found after Phase 3):
+
+- In a full-screen Space macOS hides the menu bar until the pointer touches the top edge, but nothing
+  observable changes: the WindowServer `Menubar` window keeps its frame, on-screen flag and alpha, and
+  MenuBarAgent's AX frames stay at y = 0. A window at status-bar level stays drawn over the black strip.
+- `CGSManagedDisplayGetCurrentSpace(cid, "Main")` + `CGSSpaceGetType` (private) report type 4 for a
+  full-screen Space and 0 for a desktop. The "Automatically hide and show the menu bar" setting is two
+  global defaults: `_HIHideMenuBar` (desktop) and `AppleMenuBarVisibleInFullscreen`.
+- So the stand-in follows macOS's own rule: where the menu bar auto-hides, it fades out, and fades in
+  when the pointer reaches the top edge, until the pointer leaves the bar (checked with a full-screen
+  test window: hidden → no icon, revealed → icon in place, hidden again → no icon).
+
 ## Implications for the plan
 
 - **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs 0–8,
