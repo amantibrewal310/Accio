@@ -1,17 +1,18 @@
 import AppKit
 import Combine
 
-/// Decides what the menu bar shows: hidden apps stay hidden until the user
-/// reveals them (click or hotkey), and hide again after a delay or an
-/// outside click.
+/// Decides what the menu bar shows: Hidden items stay hidden until the user
+/// reveals them (click or hotkey), Always Hidden ones until the user reveals
+/// everything (⌥-click). Both hide again after a delay or an outside click.
 @MainActor
 final class VisibilityController: ObservableObject {
     static let shared = VisibilityController()
 
-    @Published private(set) var isRevealed = false
-    /// Running apps with menu bar items, from the last scan.
-    @Published private(set) var menuBarApps: [MenuBarApp] = []
-    @Published private(set) var isTrusted = MenuBarApps.isTrusted
+    enum RevealLevel { case none, hidden, all }
+
+    @Published private(set) var revealLevel = RevealLevel.none
+    var isRevealed: Bool { revealLevel != .none }
+    @Published private(set) var isTrusted = MenuBarItems.isTrusted
     /// False when this macOS doesn't offer the hiding API.
     var isAvailable: Bool { hider != nil }
 
@@ -21,6 +22,9 @@ final class VisibilityController: ObservableObject {
 
     private let hider = MenuBarHider()
     private let preferences = Preferences.shared
+    private let registry = ItemRegistry.shared
+    /// While ItemMover drags an item, everything is shown.
+    private var isMoving = false
     private var rehideTimer: Timer?
     private var clickMonitor: Any?
     private var observers: [NSObjectProtocol] = []
@@ -31,6 +35,9 @@ final class VisibilityController: ObservableObject {
     func start() {
         if hider == nil { log("[Accio] MenuBarClientCore assessment API not found; hiding unavailable") }
         observeSystem()
+        // See what's in the bar before hiding anything, so hidden items
+        // have a known place.
+        registry.update(visible: MenuBarItems.visible())
         apply()
         rescan()
     }
@@ -41,18 +48,25 @@ final class VisibilityController: ObservableObject {
         isRevealed ? hide() : reveal()
     }
 
-    func reveal() {
-        guard !isRevealed else { return scheduleRehide() }
-        isRevealed = true
+    /// Show Hidden items, or with `all` the Always Hidden ones too.
+    func reveal(all: Bool = false) {
+        let level: RevealLevel = all || revealLevel == .all ? .all : .hidden
+        guard level != revealLevel else { return scheduleRehide() }
+        revealLevel = level
         apply()
         scheduleRehide()
         updateClickMonitor()
         onRevealChange?(true)
+        // Revealed items are drawn again: note where they are once they've faded in.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1300))
+            if self.isRevealed { self.rescan() }
+        }
     }
 
     func hide() {
         guard isRevealed else { return }
-        isRevealed = false
+        revealLevel = .none
         rehideTimer?.invalidate()
         rehideTimer = nil
         apply()
@@ -68,12 +82,22 @@ final class VisibilityController: ObservableObject {
     /// Bring the hider in line with the current state and preferences.
     func apply() {
         guard let hider else { return }
-        if isRevealed || !hasAnythingToHide {
-            hider.showAll()
+        if !isMoving, let allowList = allowList() {
+            hider.hide(allowing: allowList)
         } else {
-            hider.hide(allowing: allowList())
+            hider.showAll()
         }
         onHidingChange?(hider.isHiding)
+    }
+
+    func beginMove() {
+        isMoving = true
+        apply()
+    }
+
+    func endMove() {
+        isMoving = false
+        apply()
     }
 
     func preferencesChanged(_ change: Preferences.Change) {
@@ -86,21 +110,27 @@ final class VisibilityController: ObservableObject {
         }
     }
 
-    /// Everything that's running, minus the hidden apps. Allowing apps without
-    /// items is harmless, and means a newly launched app shows up straight away.
-    private func allowList() -> MenuBarHider.AllowList {
-        var bundleIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        bundleIDs.subtract(preferences.hiddenApps)
-        if let own = Bundle.main.bundleIdentifier { bundleIDs.insert(own) }
-        return .init(bundleIDs: bundleIDs, systemItems: preferences.shownSystemItems)
-    }
-
-    /// Holding an assertion also hides Focus and other unlisted Apple items,
-    /// so don't hold one unless something is actually meant to be hidden.
-    private var hasAnythingToHide: Bool {
-        if preferences.shownSystemItems.count < SystemItem.allCases.count { return true }
+    /// Everything that's running, minus what's hidden at the current reveal
+    /// level. Allowing apps without items is harmless, and means a newly
+    /// launched app shows up straight away.
+    ///
+    /// `nil` when nothing needs hiding: holding an assertion also hides Focus
+    /// and other unlisted Apple items, so don't hold one without a reason.
+    private func allowList() -> MenuBarHider.AllowList? {
+        var hiddenApps = preferences.alwaysHiddenApps
+        var hiddenSystemItems = preferences.alwaysHiddenSystemItems
+        switch revealLevel {
+        case .all: return nil
+        case .hidden: break
+        case .none:
+            hiddenApps.formUnion(preferences.hiddenApps)
+            hiddenSystemItems = Set(SystemItem.allCases).subtracting(preferences.shownSystemItems)
+        }
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        return !running.isDisjoint(with: preferences.hiddenApps)
+        guard !hiddenSystemItems.isEmpty || !running.isDisjoint(with: hiddenApps) else { return nil }
+        var bundleIDs = running.subtracting(hiddenApps)
+        if let own = Bundle.main.bundleIdentifier { bundleIDs.insert(own) }
+        return .init(bundleIDs: bundleIDs, systemItems: Set(SystemItem.allCases).subtracting(hiddenSystemItems))
     }
 
     // MARK: Rehide
@@ -151,23 +181,23 @@ final class VisibilityController: ObservableObject {
 
     /// Pick up an Accessibility grant made in System Settings.
     func refreshTrust() {
-        let trusted = MenuBarApps.isTrusted
+        let trusted = MenuBarItems.isTrusted
         guard trusted != isTrusted else { return }
         isTrusted = trusted
         rescan()
     }
 
-    /// Refresh `menuBarApps` in the background.
+    /// Refresh the item registry in the background.
     func rescan() {
-        guard MenuBarApps.isTrusted else { return }
+        guard MenuBarItems.isTrusted else { return }
         scanTask?.cancel()
         scanTask = Task { @MainActor in
-            let apps = await Task.detached(priority: .utility) { MenuBarApps.scan() }.value
+            let (visible, apps) = await Task.detached(priority: .utility) {
+                (MenuBarItems.visible(), MenuBarItems.apps())
+            }.value
             guard !Task.isCancelled else { return }
-            menuBarApps = apps
-            var known = preferences.knownApps
-            for app in apps { known[app.bundleID] = app.name }
-            if known != preferences.knownApps { preferences.knownApps = known }
+            registry.update(visible: visible)
+            registry.update(apps: apps)
         }
     }
 
@@ -226,50 +256,10 @@ enum MenuBarState {
         max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
     }
 
-    /// x of the leftmost status item still showing on `screen`, read from
-    /// MenuBarAgent's AX tree (needs Accessibility). Ignores Accio's own item.
-    static func leftmostVisibleItemX(on screen: NSScreen) -> CGFloat? {
-        guard
-            MenuBarApps.isTrusted,
-            let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.MenuBarAgent").first
-        else { return nil }
-        let app = AXUIElementCreateApplication(agent.processIdentifier)
-        AXUIElementSetMessagingTimeout(app, 0.1)
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        var leftmost: CGFloat?
-        for window in axChildren(app, kAXWindowsAttribute) {
-            for slot in axChildren(window, kAXChildrenAttribute) {
-                guard let frame = axFrame(slot), frame.width > 0, frame.minY < 4,
-                      frame.minX >= screen.frame.minX, frame.minX < screen.frame.maxX
-                else { continue }
-                var pid: pid_t = 0
-                if let owner = axChildren(slot, kAXChildrenAttribute).first { AXUIElementGetPid(owner, &pid) }
-                guard pid != ownPID else { continue }
-                leftmost = min(leftmost ?? frame.minX, frame.minX)
-            }
-        }
-        return leftmost
-    }
-
-    private static func axChildren(_ element: AXUIElement, _ attribute: String) -> [AXUIElement] {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return [] }
-        return value as? [AXUIElement] ?? []
-    }
-
-    private static func axFrame(_ element: AXUIElement) -> CGRect? {
-        var position: CFTypeRef?
-        var size: CFTypeRef?
-        guard
-            AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
-            AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
-            let position, let size
-        else { return nil }
-        var point = CGPoint.zero
-        var extent = CGSize.zero
-        AXValueGetValue(position as! AXValue, .cgPoint, &point)
-        AXValueGetValue(size as! AXValue, .cgSize, &extent)
-        return CGRect(origin: point, size: extent)
+    /// x of the leftmost item still showing on the main display (needs
+    /// Accessibility). Ignores Accio's own item.
+    static func leftmostVisibleItemX() -> CGFloat? {
+        MenuBarItems.visible().first?.frame.minX
     }
 
     static var isMouseInMenuBar: Bool {

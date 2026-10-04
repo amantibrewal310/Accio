@@ -41,6 +41,11 @@ final class StandInIcon {
         }
     }
 
+    var image: NSImage? {
+        get { button.image }
+        set { button.image = newValue }
+    }
+
     func setVisible(_ visible: Bool, image: NSImage?) {
         refreshTimer?.invalidate()
         refreshTimer = nil
@@ -67,7 +72,7 @@ final class StandInIcon {
         // Without Accessibility, just right of the notch (or the middle):
         // shown items are right-aligned, so that spot is usually free.
         let notchRight = screen.auxiliaryTopRightArea.map { screen.frame.minX + $0.minX }
-        var x = MenuBarState.leftmostVisibleItemX(on: screen).map { $0 - Self.width }
+        var x = MenuBarState.leftmostVisibleItemX().map { $0 - Self.width }
             ?? notchRight.map { $0 + 4 } ?? screen.frame.midX
         if let notchRight { x = max(x, notchRight) }
         let frame = NSRect(x: x, y: screen.frame.maxY - height, width: Self.width, height: height)
@@ -85,6 +90,10 @@ private final class StandInButton: NSView {
     private var isPressed = false { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Clicks fall through fully transparent pixels of a clear window, so
+        // cover the whole button with an invisible fill.
+        NSColor.black.withAlphaComponent(0.005).setFill()
+        bounds.fill()
         if isPressed {
             tint.withAlphaComponent(0.2).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 3), xRadius: 5, yRadius: 5).fill()

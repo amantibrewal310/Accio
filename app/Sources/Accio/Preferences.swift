@@ -1,6 +1,26 @@
 import Combine
 import Foundation
 
+/// Where an item goes when Accio hides things.
+enum ItemSection: String, CaseIterable, Identifiable, Sendable {
+    /// Always in the menu bar.
+    case shown
+    /// Shown when the user reveals hidden items.
+    case hidden
+    /// Shown only when the user reveals everything (⌥-click).
+    case alwaysHidden
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .shown: "Shown"
+        case .hidden: "Hidden"
+        case .alwaysHidden: "Always Hidden"
+        }
+    }
+}
+
 /// Everything the user chooses, persisted in UserDefaults. Changes apply
 /// immediately (no Apply button).
 @MainActor
@@ -12,20 +32,24 @@ final class Preferences: ObservableObject {
 
     enum Change { case visibility, shortcut, rehide }
 
-    /// Bundle IDs of apps whose items are hidden. New apps are shown.
-    @Published var hiddenApps: Set<String> {
+    /// Bundle IDs of apps in the Hidden section. New apps are shown.
+    @Published private(set) var hiddenApps: Set<String> {
         didSet { save(Array(hiddenApps), Key.hiddenApps); onChange?(.visibility) }
     }
 
+    /// Bundle IDs of apps in the Always Hidden section.
+    @Published private(set) var alwaysHiddenApps: Set<String> {
+        didSet { save(Array(alwaysHiddenApps), Key.alwaysHiddenApps); onChange?(.visibility) }
+    }
+
     /// Apple items kept visible while hiding.
-    @Published var shownSystemItems: Set<SystemItem> {
+    @Published private(set) var shownSystemItems: Set<SystemItem> {
         didSet { save(shownSystemItems.map(\.rawValue), Key.shownSystemItems); onChange?(.visibility) }
     }
 
-    /// Apps seen with menu bar items (bundle ID → name), so hidden apps stay
-    /// in the list while they're not running.
-    @Published var knownApps: [String: String] {
-        didSet { save(knownApps, Key.knownApps) }
+    /// Apple items in the Always Hidden section.
+    @Published private(set) var alwaysHiddenSystemItems: Set<SystemItem> {
+        didSet { save(alwaysHiddenSystemItems.map(\.rawValue), Key.alwaysHiddenSystemItems); onChange?(.visibility) }
     }
 
     @Published var revealShortcut: Shortcut? {
@@ -45,8 +69,9 @@ final class Preferences: ObservableObject {
 
     private enum Key {
         static let hiddenApps = "HiddenApps"
+        static let alwaysHiddenApps = "AlwaysHiddenApps"
         static let shownSystemItems = "ShownSystemItems"
-        static let knownApps = "KnownApps"
+        static let alwaysHiddenSystemItems = "AlwaysHiddenSystemItems"
         static let revealShortcut = "RevealShortcut"
         static let rehideDelay = "RehideDelay"
         static let rehidesOnOutsideClick = "RehidesOnOutsideClick"
@@ -54,18 +79,59 @@ final class Preferences: ObservableObject {
 
     private init() {
         hiddenApps = Set(defaults.stringArray(forKey: Key.hiddenApps) ?? [])
-        // Accept strings too, as written by `defaults write … -array 0 1`.
-        shownSystemItems = defaults.array(forKey: Key.shownSystemItems)
-            .map { Set($0.compactMap { ($0 as? Int) ?? ($0 as? String).flatMap(Int.init) }.compactMap(SystemItem.init(rawValue:))) }
-            ?? SystemItem.defaultShown
-        knownApps = defaults.dictionary(forKey: Key.knownApps) as? [String: String] ?? [:]
+        alwaysHiddenApps = Set(defaults.stringArray(forKey: Key.alwaysHiddenApps) ?? [])
+        shownSystemItems = Self.systemItems(defaults.array(forKey: Key.shownSystemItems)) ?? SystemItem.defaultShown
+        alwaysHiddenSystemItems = Self.systemItems(defaults.array(forKey: Key.alwaysHiddenSystemItems)) ?? []
         // An empty string means the user cleared the shortcut.
         revealShortcut = defaults.string(forKey: Key.revealShortcut).map(Shortcut.init(rawValue:)) ?? .defaultReveal
         rehideDelay = defaults.object(forKey: Key.rehideDelay) as? Int ?? 10
         rehidesOnOutsideClick = defaults.object(forKey: Key.rehidesOnOutsideClick) as? Bool ?? true
     }
 
+    /// Accepts strings too, as written by `defaults write … -array 0 1`.
+    private static func systemItems(_ array: [Any]?) -> Set<SystemItem>? {
+        array.map { Set($0.compactMap { ($0 as? Int) ?? ($0 as? String).flatMap(Int.init) }.compactMap(SystemItem.init(rawValue:))) }
+    }
+
     private func save(_ value: Any, _ key: String) {
         defaults.set(value, forKey: key)
+    }
+
+    // MARK: Sections
+
+    func section(of owner: MenuBarItem.Owner) -> ItemSection {
+        switch owner {
+        case .app(let bundleID):
+            if alwaysHiddenApps.contains(bundleID) { return .alwaysHidden }
+            return hiddenApps.contains(bundleID) ? .hidden : .shown
+        case .system(let identifier):
+            // Apple items the API can't name are hidden whenever Accio hides anything.
+            guard let item = SystemItem(menuExtraIdentifier: identifier) else { return .hidden }
+            if alwaysHiddenSystemItems.contains(item) { return .alwaysHidden }
+            return shownSystemItems.contains(item) ? .shown : .hidden
+        }
+    }
+
+    /// Whether `owner` can be put in `section`. Apple items outside
+    /// `SystemItem` (Focus…) can only be Hidden.
+    func canPlace(_ owner: MenuBarItem.Owner, in section: ItemSection) -> Bool {
+        if case .system(let identifier) = owner, SystemItem(menuExtraIdentifier: identifier) == nil {
+            return section == .hidden
+        }
+        return true
+    }
+
+    /// Moves every item of `owner`'s app (or the Apple item) to `section`.
+    func setSection(_ section: ItemSection, for owner: MenuBarItem.Owner) {
+        guard canPlace(owner, in: section), self.section(of: owner) != section else { return }
+        switch owner {
+        case .app(let bundleID):
+            if section == .hidden { hiddenApps.insert(bundleID) } else { hiddenApps.remove(bundleID) }
+            if section == .alwaysHidden { alwaysHiddenApps.insert(bundleID) } else { alwaysHiddenApps.remove(bundleID) }
+        case .system(let identifier):
+            guard let item = SystemItem(menuExtraIdentifier: identifier) else { return }
+            if section == .shown { shownSystemItems.insert(item) } else { shownSystemItems.remove(item) }
+            if section == .alwaysHidden { alwaysHiddenSystemItems.insert(item) } else { alwaysHiddenSystemItems.remove(item) }
+        }
     }
 }

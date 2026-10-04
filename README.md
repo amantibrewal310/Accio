@@ -5,7 +5,8 @@
 A lightweight, polished, open-source menu bar manager for macOS. It hides the icons you rarely use,
 brings any of them back on demand, and keeps them out from behind the notch.
 
-> **Status:** Phase 1, MVP. Hides the menu bar apps you choose and brings them back on demand.
+> **Status:** Phase 2. Hides the menu bar items you choose (Hidden / Always Hidden), brings them back on
+> demand, and rearranges the real menu bar from a drag-and-drop layout editor.
 
 ## Docs
 
@@ -19,9 +20,12 @@ brings any of them back on demand, and keeps them out from behind the notch.
 open build/Accio.app
 ```
 
-- **Click** the wand to show or hide items, **right-click** it for the menu, **⌥-click** for Settings.
-- **⌃⌥⌘A** shows hidden items from anywhere; they hide again after 10 s (configurable).
-- Choose what's hidden in **Settings → Menu Bar Items**. Listing apps needs Accessibility access.
+- **Click** the wand to show Hidden items, **⌥-click** to show Always Hidden items too,
+  **right-click** for the menu.
+- **⌃⌥⌘A** shows Hidden items from anywhere; they hide again after 10 s (configurable).
+- **Settings → Layout** lists every item in three rows: Shown, Hidden, Always Hidden. Drag an item to
+  another row to change when it shows; drop it onto another item to move it next to that item in the real
+  menu bar. Needs Accessibility access (the first-launch window asks for it).
 - Run `./scripts/dev-signing.sh` once: builds are then signed with a local identity, so macOS keeps the
   Accessibility grant across rebuilds.
 - Without an Apple-issued certificate, macOS hides Accio's own status item along with the rest

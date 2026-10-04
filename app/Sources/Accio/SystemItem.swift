@@ -13,6 +13,26 @@ enum SystemItem: Int, CaseIterable, Identifiable, Sendable {
 
     var id: Int { rawValue }
 
+    /// From the identifier MenuBarAgent gives the item in its AX tree.
+    /// `com.apple.menuextra.display`, `.wifi` etc. were seen on macOS 27; the
+    /// rest are best guesses, so several spellings are accepted.
+    init?(menuExtraIdentifier identifier: String) {
+        let prefix = "com.apple.menuextra."
+        guard identifier.hasPrefix(prefix) else { return nil }
+        switch identifier.dropFirst(prefix.count).lowercased() {
+        case "battery": self = .battery
+        case "bluetooth": self = .bluetooth
+        case "clock": self = .clock
+        case "display", "displays": self = .displays
+        case "keyboard", "keyboardbrightness": self = .keyboard
+        case "volume", "sound": self = .volume
+        case "wifi", "airport": self = .wifi
+        case "screenmirroring", "airplay": self = .screenMirroring
+        case "controlcenter": self = .controlCenter
+        default: return nil
+        }
+    }
+
     var title: String {
         switch self {
         case .battery: "Battery"

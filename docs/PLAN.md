@@ -117,7 +117,16 @@ macOS internals here are undocumented and changed in 26. Before writing the real
 - Minimal SwiftUI Settings: hotkey, rehide delay, launch at login.
 - **Ship to yourself and daily-drive it.**
 
-### Phase 2 — Item discovery, layout editor, Always Hidden (2–3 weeks)
+### Phase 2 — Item discovery, layout editor, Always Hidden (2–3 weeks) ✅ done, adapted to macOS 27
+
+As built: sections are per app (the allow-list's granularity), so there is no divider: **Always Hidden**
+is a second reveal level (⌥-click) that keeps those apps out of the allow-list. Discovery reads
+MenuBarAgent's AX tree for what's drawn and each app's `AXExtrasMenuBar` for apps whose items are hidden;
+`ItemRegistry` remembers hidden items' places. Item identity is bundle ID + index (or the system
+identifier). `ItemMover` shows every item while it ⌘-drags (spikes §5b). No Screen Recording step:
+hidden items can't be captured on 27, so tiles use app icons and SF Symbols.
+
+Original plan:
 - `ItemDiscovery` + `ItemRegistry` (event-driven rescans as in §3).
 - Second divider → **Always Hidden** section.
 - **Layout editor** in Settings: three rows (Shown / Hidden / Always Hidden) showing every item with app icon + name (+ live image if Screen Recording granted); drag between rows → `ItemMover` performs the real move.

@@ -23,6 +23,7 @@ Accessibility and Screen Recording granted to the host process.
 | 4 | Click forwarding | ✅ Works | `AXPress` (no cursor move) for apps; CGEvent at slot for system items |
 | 4b | Reveal one hidden app, then open it | ✅ Works | Activate new assertion, then invalidate the old one; no flash |
 | 5 | Reordering (⌘-drag) | ✅ Works | 10/10 with a slow drag (12 steps × 30 ms); fast drags fail |
+| 5b | Reordering while only some items show | ❌ Reshuffles | Show every item while moving |
 | 3 | Image capture of hidden items | ❌ Not possible | Hidden items aren't drawn; use app icons / SF Symbols |
 
 ## 2. Window-list enumeration ❌
@@ -214,6 +215,32 @@ order read from the owning app's `AXExtrasMenuBar` titles:
 
 AX order updates lag slightly behind the move; verify by polling.
 
+## 5b. Reordering while hiding ❌, and other Phase 2 findings
+
+Tested with `MBAssessmentModeAssertion` allowing only the two items involved (so both are drawn even on a
+full bar), then ⌘-dragging Maccy to the right of Bluetooth:
+
+| Before | After invalidating |
+|---|---|
+| `Maccy Passwords Display Bluetooth Wi-Fi Battery CC Clock` | `Passwords Display Wi-Fi Battery Bluetooth Maccy CC Clock` |
+
+The drop works, but macOS saves the positions of the *visible* layout, so Bluetooth moved too. Moves must
+happen with **every item shown**; then 2/2 moves landed exactly. Items that don't fit (behind the notch or
+the overflow chevron) can't be moved.
+
+Also found while building Phase 2:
+
+- **Hidden items vanish from MenuBarAgent's tree** (they come back when shown). Apps with hidden items are
+  still found through their own `AXExtrasMenuBar`, so discovery needs both sources.
+- For third-party slots, the slot's child is the app's `AXApplication` (→ its main `AXMenuBar`), not the
+  status item, so the tree gives the owner but no title or identifier. Apple items do carry
+  `AXIdentifier` (`com.apple.menuextra.battery` …; Display is `com.apple.menuextra.display`).
+- `AXImageData` exists on the battery item only, so it's no source of item images.
+- macOS shows some Apple items only in some states: Display was drawn while an assertion was active and
+  gone once everything was shown, with Focus in its place.
+- A borderless window with a clear background lets clicks through its fully transparent pixels. The
+  stand-in only caught clicks on the glyph's strokes until it got a near-invisible fill.
+
 ## Implications for the plan
 
 - **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs 0–8,
@@ -225,7 +252,7 @@ AX order updates lag slightly behind the move; verify by polling.
   event-driven. Don't trust AX for hidden state; Accio's own state is the source of truth.
 - **Open an item** = `AXPress` for apps, CGEvent click for system items. For a hidden item: add it to the
   allow-list, wait for the ~1 s fade, click, restore when its menu closes.
-- **Reorder** = slow synthesised ⌘-drag, verified by polling.
+- **Reorder** = slow synthesised ⌘-drag, verified by polling, with every item shown (§5b).
 - **No live images** of hidden items: the Bar and Search show app icons and SF Symbols.
 - **Risk:** all of this rests on private API that Apple can gate in any update. Keep icemelt-style
   spacers as the documented fallback, and isolate the assertion behind one small module.
