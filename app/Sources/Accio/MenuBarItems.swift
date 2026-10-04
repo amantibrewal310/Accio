@@ -34,6 +34,15 @@ struct MenuBarItem: Identifiable, Hashable, Sendable {
     static func appItemID(_ bundleID: String, index: Int) -> String {
         "\(bundleID)#\(index)"
     }
+
+    /// Accio's own status item. It isn't in any section: it's the line
+    /// between hidden items (left of it) and shown ones (right of it).
+    static let accio: MenuBarItem = {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.accio.app"
+        return MenuBarItem(id: appItemID(bundleID, index: 0), owner: .app(bundleID: bundleID), name: "Accio")
+    }()
+
+    var isAccio: Bool { id == Self.accio.id }
 }
 
 /// An item that is drawn in the menu bar right now.
@@ -66,8 +75,8 @@ enum MenuBarItems {
     /// Items drawn on the main display's menu bar, left to right, from
     /// MenuBarAgent's AX tree: one slot per item, whose first child belongs to
     /// the item's app. Items hidden by Accio aren't listed. Accio's own item
-    /// is left out. Takes a few milliseconds.
-    static func visible() -> [VisibleItem] {
+    /// is left out unless `includingOwn`. Takes a few milliseconds.
+    static func visible(includingOwn: Bool = false) -> [VisibleItem] {
         guard
             isTrusted,
             let agent = NSRunningApplication.runningApplications(withBundleIdentifier: agentBundleID).first
@@ -88,7 +97,7 @@ enum MenuBarItems {
                     let owner = AX.children(slot).first
                 else { continue }
                 let pid = AX.pid(owner)
-                guard pid != ownPID, seen.insert("\(pid):\(Int(frame.minX))").inserted else { continue }
+                guard includingOwn || pid != ownPID, seen.insert("\(pid):\(Int(frame.minX))").inserted else { continue }
                 slots.append((frame, owner, pid))
             }
         }
@@ -97,6 +106,7 @@ enum MenuBarItems {
         var appIndex: [String: Int] = [:]
         var names: [pid_t: String] = [:]
         return slots.compactMap { slot in
+            if slot.pid == ownPID { return VisibleItem(item: .accio, frame: slot.frame) }
             if slot.pid == agentPID {
                 // Apple's items: slot → hosting view → the item, which has the identifier.
                 var element = slot.owner

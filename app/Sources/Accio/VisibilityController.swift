@@ -35,11 +35,18 @@ final class VisibilityController: ObservableObject {
     func start() {
         if hider == nil { log("[Accio] MenuBarClientCore assessment API not found; hiding unavailable") }
         observeSystem()
-        // See what's in the bar before hiding anything, so hidden items
-        // have a known place.
-        registry.update(visible: MenuBarItems.visible())
-        apply()
-        rescan()
+        Task { @MainActor in
+            // See what's in the bar before hiding anything, so hidden items
+            // have a known place. Accio's own item is drawn a moment after
+            // it's created, and unsigned builds hide it while hiding, so wait
+            // for it (briefly): the stand-in icon goes where it would be.
+            for _ in 0..<20 where MenuBarItems.isTrusted && MenuBarItems.ownItemFrame() == nil {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            registry.update(visible: MenuBarItems.visible(includingOwn: true))
+            apply()
+            rescan()
+        }
     }
 
     // MARK: Reveal / hide
@@ -93,6 +100,7 @@ final class VisibilityController: ObservableObject {
     /// Whether `item` is drawn while the current assertion holds.
     func staysVisible(_ item: MenuBarItem) -> Bool {
         guard let hider, hider.isHiding, let allowList = hider.allowList else { return true }
+        if item.isAccio { return MenuBarHider.keepsOwnIconVisible }
         switch item.owner {
         case .app(let bundleID): return allowList.bundleIDs.contains(bundleID)
         case .system: return item.systemItem.map(allowList.systemItems.contains) ?? false
@@ -202,7 +210,7 @@ final class VisibilityController: ObservableObject {
         scanTask?.cancel()
         scanTask = Task { @MainActor in
             let (visible, apps) = await Task.detached(priority: .utility) {
-                (MenuBarItems.visible(), MenuBarItems.apps())
+                (MenuBarItems.visible(includingOwn: true), MenuBarItems.apps())
             }.value
             guard !Task.isCancelled else { return }
             registry.update(visible: visible)

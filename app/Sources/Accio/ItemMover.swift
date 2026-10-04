@@ -17,6 +17,8 @@ final class ItemMover: ObservableObject {
     @Published private(set) var movingID: String?
     /// Why the last move failed, if it did.
     @Published private(set) var failure: String?
+    /// While `tidy()` arranges the whole bar.
+    @Published private(set) var isTidying = false
 
     private let controller = VisibilityController.shared
 
@@ -27,33 +29,100 @@ final class ItemMover: ObservableObject {
         guard movingID == nil, item.id != target.id else { return }
         guard MenuBarItems.isTrusted else { return fail("Accio needs Accessibility access to move items.") }
         guard !item.isPinned else { return fail("macOS keeps \(item.name) in place.") }
-        movingID = item.id
         failure = nil
         controller.beginMove()
         defer {
             movingID = nil
             controller.endMove()
         }
+        _ = await perform(item, side, target)
+    }
 
+    /// Put hidden items left of Accio's own item and shown ones right of it,
+    /// so Accio's icon stays where it is when they show and hide. With
+    /// `item`, only that item is moved, if it's on the wrong side.
+    func tidy(only item: MenuBarItem? = nil) async {
+        guard movingID == nil else { return }
+        guard MenuBarItems.isTrusted else { return fail("Accio needs Accessibility access to move items.") }
+        failure = nil
+        isTidying = item == nil
+        controller.beginMove()
+        defer {
+            movingID = nil
+            isTidying = false
+            controller.endMove()
+        }
+        // Each step moves one item; a full tidy rarely needs more than a few.
+        for _ in 0..<24 {
+            let visible = await waitForStableBar()
+            guard let step = Self.nextTidyStep(visible, only: item) else { return }
+            guard await perform(step.item, step.side, step.target) else { return }
+        }
+    }
+
+    /// The next move that brings the bar closer to tidy, or `nil` once it is.
+    private static func nextTidyStep(_ visible: [VisibleItem], only: MenuBarItem?) -> (item: MenuBarItem, side: Side, target: MenuBarItem)? {
+        let order = visible.map(\.item)
+        guard let accioIndex = order.firstIndex(where: \.isAccio) else { return nil }
+        let preferences = Preferences.shared
+        let others = order.filter { !$0.isAccio }
+        let isShown = others.map { preferences.section(of: $0.owner) == .shown }
+        let accio = order[accioIndex]
+
+        if let only {
+            guard let index = others.firstIndex(where: { $0.id == only.id }) else { return nil }
+            let isLeft = index < accioIndex
+            if isShown[index] == isLeft { return (only, isShown[index] ? .right : .left, accio) }
+            return nil
+        }
+
+        // Where Accio goes: the spot that leaves the fewest items to move
+        // (moving Accio itself counts as one).
+        let current = accioIndex
+        func cost(_ boundary: Int) -> Int {
+            isShown[..<boundary].filter { $0 }.count + isShown[boundary...].filter { !$0 }.count + (boundary == current ? 0 : 1)
+        }
+        let best = (0...others.count).min { (cost($0), $0 == current ? 0 : 1) < (cost($1), $1 == current ? 0 : 1) }!
+        if best != current {
+            return best < others.count ? (accio, .left, others[best]) : (accio, .right, others[others.count - 1])
+        }
+        // Hidden items to Accio's left, in order; shown ones to its right, from the right.
+        if let index = isShown.indices.first(where: { $0 >= current && !isShown[$0] }) {
+            return (others[index], .left, accio)
+        }
+        if let index = isShown.indices.last(where: { $0 < current && isShown[$0] }) {
+            return (others[index], .right, accio)
+        }
+        return nil
+    }
+
+    /// One verified move, retried once. Assumes every item is shown.
+    private func perform(_ item: MenuBarItem, _ side: Side, _ target: MenuBarItem) async -> Bool {
+        movingID = item.id
         for attempt in 1...2 {
             let found = await waitForItems(item, target)
             guard let source = found.source, let destination = found.destination else {
                 let missing = found.source == nil ? item : target
-                return fail("\(missing.name) isn't in the menu bar right now, so Accio can't move items next to it.")
+                fail("\(missing.name) isn't in the menu bar right now, so Accio can't move items next to it.")
+                return false
             }
-            if isInPlace(item, side, target) { return }
-            if let reason = notDrawnReason(source, destination) { return fail(reason) }
+            if isInPlace(item, side, target) { return true }
+            if let reason = notDrawnReason(source, destination) {
+                fail(reason)
+                return false
+            }
             await drag(from: source.frame, to: side == .left
                 ? CGPoint(x: destination.frame.minX + 3, y: destination.frame.midY)
                 : CGPoint(x: destination.frame.maxX - 3, y: destination.frame.midY))
             // AX catches up with the move a little later.
             for _ in 0..<15 {
                 try? await Task.sleep(for: .milliseconds(100))
-                if isInPlace(item, side, target) { return }
+                if isInPlace(item, side, target) { return true }
             }
             log("[Mover] \(item.id) not in place after attempt \(attempt)")
         }
         fail("macOS didn't move \(item.name). Try again, or ⌘-drag it in the menu bar.")
+        return false
     }
 
     private func fail(_ reason: String) {
@@ -63,25 +132,30 @@ final class ItemMover: ObservableObject {
 
     /// Both items, once every item has faded in and the bar has settled.
     private func waitForItems(_ item: MenuBarItem, _ target: MenuBarItem) async -> (source: VisibleItem?, destination: VisibleItem?) {
+        let visible = await waitForStableBar { visible in
+            visible.contains { $0.item.id == item.id } && visible.contains { $0.item.id == target.id }
+        }
+        return (visible.first { $0.item.id == item.id }, visible.first { $0.item.id == target.id })
+    }
+
+    /// What's drawn, including Accio, once nothing has moved for 150 ms
+    /// (and `isReady`); gives up after ~3 s. The fade-in takes about one.
+    private func waitForStableBar(until isReady: ([VisibleItem]) -> Bool = { _ in true }) async -> [VisibleItem] {
         var previous: [CGRect] = []
-        var source: VisibleItem?
-        var destination: VisibleItem?
-        // Up to ~3 s: the fade-in takes about one.
+        var visible: [VisibleItem] = []
         for _ in 0..<20 {
-            let visible = MenuBarItems.visible()
+            visible = MenuBarItems.visible(includingOwn: true)
             ItemRegistry.shared.update(visible: visible)
-            source = visible.first { $0.item.id == item.id }
-            destination = visible.first { $0.item.id == target.id }
             let frames = visible.map(\.frame)
-            if source != nil, destination != nil, frames == previous { return (source, destination) }
+            if frames == previous, isReady(visible) { return visible }
             previous = frames
             try? await Task.sleep(for: .milliseconds(150))
         }
-        return (source, destination)
+        return visible
     }
 
     private func isInPlace(_ item: MenuBarItem, _ side: Side, _ target: MenuBarItem) -> Bool {
-        let visible = MenuBarItems.visible()
+        let visible = MenuBarItems.visible(includingOwn: true)
         ItemRegistry.shared.update(visible: visible)
         let ids = visible.map(\.item.id)
         guard let index = ids.firstIndex(of: item.id), let targetIndex = ids.firstIndex(of: target.id) else { return false }
@@ -96,7 +170,7 @@ final class ItemMover: ObservableObject {
             guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
             return CGRect(x: screen.frame.minX + left.maxX, y: 0, width: right.minX - left.maxX, height: left.height)
         }
-        let visible = MenuBarItems.visible()
+        let visible = MenuBarItems.visible(includingOwn: true)
         for item in items {
             let behindNotch = notch.map { $0.intersects(item.frame) } ?? false
             let stacked = visible.contains { $0.item.id != item.item.id && $0.frame.intersection(item.frame).width > 2 }

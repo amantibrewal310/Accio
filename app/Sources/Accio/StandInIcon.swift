@@ -2,16 +2,16 @@ import AppKit
 import ImageIO
 
 /// Accio's icon for builds whose own status item gets hidden too (no team
-/// signature, docs/spikes.md §1d): a small window drawn in the menu bar,
-/// just left of the items that are still visible. The assertion only hides
-/// status items, so this stays put. Shown only while hiding.
+/// signature, docs/spikes.md §1d): a small window drawn in the menu bar
+/// where the real item would be. The assertion only hides status items, so
+/// this stays put. Shown only while hiding.
 @MainActor
 final class StandInIcon {
     private let panel: NSPanel
     private let button: StandInButton
     private var refreshTimer: Timer?
     /// Follows the bar as items fade, appear late (Display) or change width.
-    private lazy var barObserver = MenuBarObserver { [weak self] in self?.reposition() }
+    private lazy var barObserver = MenuBarObserver { [weak self] in self?.reposition(animated: true) }
 
     var onClick: ((NSEvent.ModifierFlags) -> Void)?
     var onMenu: ((NSView) -> Void)?
@@ -25,6 +25,8 @@ final class StandInIcon {
     private var ownItemFrame: CGRect?
     /// While the icon glides between the real item's place and its own.
     private var isGliding = false
+    /// The bar changed during a glide; catch up once it ends.
+    private var needsReposition = false
 
     /// Matches a square status item on a notched display.
     private static let width: CGFloat = 38
@@ -122,7 +124,15 @@ final class StandInIcon {
         }
         if let own = MenuBarItems.ownItemFrame() {
             ownItemFrame = own
-            glide(to: own.minX, completion: done)
+            if abs(panel.frame.minX - own.minX) <= 1 {
+                // Already on it: stay on top until it has faded in, or it blinks.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(400))
+                    done()
+                }
+            } else {
+                glide(to: own.minX, completion: done)
+            }
         } else if ContinuousClock.now >= deadline {
             fade(to: 0, completion: done)
         } else {
@@ -147,12 +157,17 @@ final class StandInIcon {
         isGliding = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            // Quick start, soft landing, like the system's own item moves.
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
             panel.animator().setFrame(target, display: true)
         } completionHandler: {
             MainActor.assumeIsolated {
                 self.isGliding = false
                 completion()
+                if self.needsReposition {
+                    self.needsReposition = false
+                    self.reposition(animated: true)
+                }
             }
         }
     }
@@ -172,20 +187,30 @@ final class StandInIcon {
         }
     }
 
-    private func reposition() {
-        guard !isGliding, let x = targetX() else { return }
+    /// Follow the bar; `animated` slides along with items that move.
+    private func reposition(animated: Bool = false) {
+        guard !isGliding else {
+            needsReposition = true
+            return
+        }
+        guard let x = targetX() else { return }
         if let screen = NSScreen.screens.first { button.tint = MenuBarTint.glyphColor(on: screen) }
         let frame = frame(atX: x)
-        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        guard panel.frame != frame else { return }
+        if animated, panel.isVisible {
+            glide(to: x) {}
+        } else {
+            panel.setFrame(frame, display: true)
+        }
     }
 
-    /// Left of the leftmost item once the bar settles, but never behind the
-    /// notch. Without Accessibility, just right of the notch (or the
+    /// Where the real item would be once the bar settles, but never behind
+    /// the notch. Without Accessibility, just right of the notch (or the
     /// middle): shown items are right-aligned, so that spot is usually free.
     private func targetX() -> CGFloat? {
         guard let screen = NSScreen.screens.first else { return nil }
         let notchRight = screen.auxiliaryTopRightArea.map { screen.frame.minX + $0.minX }
-        var x = settledLeftEdge().map { $0 - Self.width }
+        var x = settledOwnMaxX().map { $0 - Self.width }
             ?? notchRight.map { $0 + 4 } ?? screen.frame.midX
         if let notchRight { x = max(x, notchRight) }
         return x
@@ -199,22 +224,29 @@ final class StandInIcon {
 }
 
 extension StandInIcon {
-    /// x of the leftmost item once the bar has settled. Items are packed
-    /// against the right end, so add up the room each staying item takes
-    /// (its distance to its right neighbour: Apple's items have 16 pt gaps,
-    /// apps' items none). Right after hiding starts, the hidden items are
-    /// still drawn and would put the icon too far left.
-    private func settledLeftEdge() -> CGFloat? {
+    /// Right edge of the real item once the bar has settled: just left of
+    /// the first item to its right that stays drawn. Items are packed
+    /// against the right end, so add up the room each staying item right of
+    /// Accio takes (its distance to its right neighbour: Apple's items have
+    /// about 8 pt of padding on each side, apps' items none). Right after
+    /// hiding starts, the hidden items are still drawn and would put the
+    /// icon too far left.
+    private func settledOwnMaxX() -> CGFloat? {
         let visible = MenuBarItems.visible()
         guard let right = visible.map(\.frame.maxX).max() else { return nil }
-        var room: CGFloat = 0
-        var anyStaying = false
-        for (index, item) in visible.enumerated() where staysVisible?(item.item) ?? true {
-            anyStaying = true
+        // Accio's place among the items, from when it was last drawn.
+        let order = ItemRegistry.shared.items.map(\.id)
+        let leftOfAccio = order.firstIndex(of: MenuBarItem.accio.id).map { Set(order[..<$0]) } ?? []
+        var x = right
+        var leftPadding: CGFloat = 0
+        for (index, item) in visible.enumerated().reversed() where staysVisible?(item.item) ?? true {
+            if leftOfAccio.contains(item.item.id) { break }
             let next = index + 1 < visible.count ? visible[index + 1].frame.minX : item.frame.maxX
-            room += next - item.frame.minX
+            let advance = next - item.frame.minX
+            x -= advance
+            leftPadding = item.item.bundleID == nil ? ((advance - item.frame.width) / 2).rounded(.down) : 0
         }
-        return anyStaying ? right - room : nil
+        return x - leftPadding
     }
 }
 
