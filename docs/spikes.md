@@ -14,7 +14,8 @@ Accessibility and Screen Recording granted to the host process.
 | 2b | Enumerate items via Accessibility | ✅ Works | 115 ms full scan; system items are anonymous |
 | 6 | Notch geometry | ✅ Works | |
 | 1 | Divider hiding | ❌ Broken on macOS 27 | Oversized item is dropped by the system instead of pushing others off-screen |
-| 1b | Hiding via `MBAssessmentModeAssertion` allow-list | ⏳ In progress | Private API activates successfully from an unentitled process; visual effect not yet confirmed |
+| 1b | Hiding via `MBAssessmentModeAssertion` allow-list | ✅ Works | Shows only allow-listed apps + system items, animated; auto-released if the process dies |
+| 2c | Enumerate via MenuBarAgent's AX tree | ✅ Works | Owner bundle ID per slot, and identifiers for system items |
 | 3 | Image capture | ⏳ Pending | Needs redesign: no per-item window to capture |
 | 4 | Click forwarding | ⏳ Pending | `AXPress` is the likely route for third-party items |
 | 5 | Reordering (⌘-drag) | ⏳ Pending | |
@@ -87,34 +88,61 @@ Mac was in full-screen mode, where the menu bar is hidden).
   - Clicks with `CGEvent` at the slot centre (opening the chevron first for hidden items). No image capture
     on 27: uses app icons / SF Symbols. Reorders with synthesised ⌘-drag.
 
-## 1b. `MBAssessmentModeAssertion` ⏳
+## 1b. `MBAssessmentModeAssertion` ✅
 
 `/System/Library/PrivateFrameworks/MenuBarClientCore.framework` (Objective-C classes, loadable with
-`dlopen` + `NSClassFromString`):
+`dlopen` + `NSClassFromString`; probes in `spikes/probes/`):
 
 - `MBAssessmentModeConfiguration initWithAllowedSystemItems:(NSArray<NSNumber>) allowedBundleIdentifiers:(NSArray<NSString>)`
 - `MBAssessmentModeAssertion init`, `activateWithConfiguration:completionHandler:`, `invalidate`
 - Also present: `MBMenuBarItemManager` (`setItems:`, `setGloballyHidden:`, `startMenuTrackingForItemID:`,
   `navigateInDirection:`…), `MBUtilities getPreferredTrailingItemPositions` / `clearPreferredTrailingItemPositions`.
 
-This looks like the menu bar side of exam ("assessment") mode: **show only an allow-list of items**. If it
-works for us, it is a clean hiding mechanism: allow-list = Accio's Shown section, and invalidating the
-assertion reveals everything.
+This is the menu bar side of exam ("assessment") mode: **show only an allow-list of items**.
 
-- Activating it from a plain, unentitled, unsigned process with allow-list `[org.p0deje.Maccy]` returned
-  **success**.
-- Visual effect not yet confirmed (screenshots were taken while the Mac was in full-screen mode).
-- To find out: does it hide the non-allowed items? Does it hide system items too (and which `NSNumber` IDs
-  map to which system item)? Does it have other side effects of exam mode? Is it released when the
-  process exits?
+Results, verified with screenshots:
 
-## Implications for the plan so far
+- Works from a plain, unentitled, unsigned process. Completion handler reports success.
+- With allow-list `[org.p0deje.Maccy]` the bar showed **only Maccy**. Everything else was hidden, **including
+  system items** (clock, Wi-Fi, battery, Control Center). `invalidate` restores everything.
+- Items fade out/in with a system animation (~1 s); this looks native.
+- **Crash-safe:** killing the process without `invalidate` restored every item within 2 s.
+- Allowed system item IDs (`NSNumber`), from a sweep of 0–16 with one ID allowed at a time:
 
-- `ItemDiscovery` must be **Accessibility-based**, not window-based. The `WindowServerClient`
-  abstraction in the plan stays, but its first implementation is AX.
-- Accessibility permission becomes **required** for discovery (it was already required for moving/clicking).
-- Enumeration should read **MenuBarAgent's AX tree** (slots + owner pid), not each app's `AXExtrasMenuBar`.
-- The plan's divider-based Phase 1 doesn't work on macOS 27. Hiding is either the
-  `MBAssessmentModeAssertion` allow-list (if 1b confirms) or icemelt-style spacers into the system overflow.
-- Item images (Bar, Groups, Search, Show for updates) can no longer capture per-item windows. Hidden
-  items aren't drawn at all, so the fallback is app icons / SF Symbols.
+  | ID | Item | ID | Item |
+  |---|---|---|---|
+  | 0 | Battery | 6 | Wi-Fi |
+  | 1 | Bluetooth | 8 | Control Center |
+  | 2 | Clock | 3–5, 7, 9–16 | nothing visible (items not in this bar: Sound, Focus, …?) |
+
+  Focus (`com.apple.menuextra.focusmode`) was in the bar but didn't appear for any ID 0–16. Still to map.
+
+Limitations / open questions:
+
+- Granularity is **per app** (bundle ID): can't show one of an app's items and hide another.
+- Private API: Apple could gate it behind an entitlement in any update. Keep the icemelt-style spacer
+  approach as a documented fallback.
+- Unknown: interaction with real exam mode / other apps holding the same assertion (e.g. another menu bar
+  manager); whether hidden items stay reachable via the system overflow chevron.
+
+## 2c. MenuBarAgent AX tree ✅
+
+Reading `com.apple.MenuBarAgent`'s AX windows → children (one per slot):
+
+- Each slot's first child is owned by the item's app (`AXUIElementGetPid`) → bundle ID, without messaging
+  the app.
+- System items carry identifiers: `com.apple.menuextra.{clock,wifi,battery,bluetooth,controlcenter,focusmode}`.
+- The agent currently holds **3 windows** for one display, so every slot appears 3 times. Deduplicate (or
+  find out what the extra windows are).
+- AX contents **don't reflect assertion-hidden state** reliably, so use our own state for "hidden", not AX.
+
+## Implications for the plan
+
+- **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs, always
+  including Accio itself). Reveal all = invalidate. Reveal one = re-activate with that app added.
+  Fallback if Apple closes it: icemelt-style spacers into the system overflow.
+- **Discovery = MenuBarAgent's AX tree** (owners + system identifiers), event-driven.
+- Sections are **per app**, not per item.
+- Item images: hidden items aren't drawn, so the Bar / Search use app icons and SF Symbols for system items.
+- Still to spike: clicking an item (CGEvent at the AX slot centre), the "reveal one item and open it" flow,
+  ⌘-drag reordering, and the remaining system item IDs.
