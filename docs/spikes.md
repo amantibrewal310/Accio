@@ -8,17 +8,21 @@ Accessibility and Screen Recording granted to the host process.
 
 ## Summary
 
-| # | Primitive | Status | Notes |
+**Verdict: feasible on macOS 27.** Every primitive Accio needs has a working approach.
+
+| # | Primitive | Status | Approach on macOS 27 |
 |---|---|---|---|
-| 2 | Enumerate items via window list | ❌ Broken on macOS 27 | No per-item windows exist any more |
-| 2b | Enumerate items via Accessibility | ✅ Works | 115 ms full scan; system items are anonymous |
-| 6 | Notch geometry | ✅ Works | |
-| 1 | Divider hiding | ❌ Broken on macOS 27 | Oversized item is dropped by the system instead of pushing others off-screen |
-| 1b | Hiding via `MBAssessmentModeAssertion` allow-list | ✅ Works | Shows only allow-listed apps + system items, animated; auto-released if the process dies |
-| 2c | Enumerate via MenuBarAgent's AX tree | ✅ Works | Owner bundle ID per slot, and identifiers for system items |
-| 3 | Image capture | ⏳ Pending | Needs redesign: no per-item window to capture |
-| 4 | Click forwarding | ⏳ Pending | `AXPress` is the likely route for third-party items |
-| 5 | Reordering (⌘-drag) | ⏳ Pending | |
+| 2 | Enumerate via window list | ❌ Broken | No per-item windows exist any more |
+| 2b | Enumerate via each app's `AXExtrasMenuBar` | ✅ Works | ~115 ms full scan; system items anonymous |
+| 2c | Enumerate via MenuBarAgent's AX tree | ✅ Works | Owner bundle ID per slot + system identifiers. **Use this** |
+| 6 | Notch geometry | ✅ Works | `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` |
+| 1 | Divider hiding | ❌ Broken | Oversized item is dropped by the system |
+| 1b | Hiding via `MBAssessmentModeAssertion` | ✅ Works | Allow-list; union of active assertions; crash-safe |
+| 1c | System item IDs | ✅ Mapped | 0–8; Focus not allow-listable |
+| 4 | Click forwarding | ✅ Works | `AXPress` (no cursor move) for apps; CGEvent at slot for system items |
+| 4b | Reveal one hidden app, then open it | ✅ Works | Activate new assertion, then invalidate the old one; no flash |
+| 5 | Reordering (⌘-drag) | ✅ Works | 10/10 with a slow drag (12 steps × 30 ms); fast drags fail |
+| 3 | Image capture of hidden items | ❌ Not possible | Hidden items aren't drawn; use app icons / SF Symbols |
 
 ## 2. Window-list enumeration ❌
 
@@ -107,23 +111,15 @@ Results, verified with screenshots:
   system items** (clock, Wi-Fi, battery, Control Center). `invalidate` restores everything.
 - Items fade out/in with a system animation (~1 s); this looks native.
 - **Crash-safe:** killing the process without `invalidate` restored every item within 2 s.
-- Allowed system item IDs (`NSNumber`), from a sweep of 0–16 with one ID allowed at a time:
+- System items are allowed by `NSNumber` ID; see 1c for the mapping.
 
-  | ID | Item | ID | Item |
-  |---|---|---|---|
-  | 0 | Battery | 6 | Wi-Fi |
-  | 1 | Bluetooth | 8 | Control Center |
-  | 2 | Clock | 3–5, 7, 9–16 | nothing visible (items not in this bar: Sound, Focus, …?) |
-
-  Focus (`com.apple.menuextra.focusmode`) was in the bar but didn't appear for any ID 0–16. Still to map.
-
-Limitations / open questions:
+Limitations:
 
 - Granularity is **per app** (bundle ID): can't show one of an app's items and hide another.
+- Active assertions combine as a union (see 4b), so another holder can keep items visible.
 - Private API: Apple could gate it behind an entitlement in any update. Keep the icemelt-style spacer
   approach as a documented fallback.
-- Unknown: interaction with real exam mode / other apps holding the same assertion (e.g. another menu bar
-  manager); whether hidden items stay reachable via the system overflow chevron.
+- Not tested yet: whether hidden items are still reachable through the system overflow chevron.
 
 ## 2c. MenuBarAgent AX tree ✅
 
@@ -136,13 +132,73 @@ Reading `com.apple.MenuBarAgent`'s AX windows → children (one per slot):
   find out what the extra windows are).
 - AX contents **don't reflect assertion-hidden state** reliably, so use our own state for "hidden", not AX.
 
+## 1c. System item IDs ✅
+
+`MBSystemItemIdentifier` is a 9-case Int enum (`CaseIterable`; case names stripped). Read via Swift runtime
+reflection (`allCases` / `rawValue`) and `init(stringValue:)`. That init returns an `Optional` of an
+Int-laid-out enum, so the nil flag comes back in a second register; a tiny C shim reads it
+(`spikes/probes/system-item-names*`). The init consumes its String argument (+1), so callers must hand
+over an owned copy.
+
+| ID | `stringValue` | Verified on screen |
+|---|---|---|
+| 0 | `battery` | ✅ |
+| 1 | `bluetooth` | ✅ |
+| 2 | `clock` | ✅ |
+| 3 | `displays` | (not in this bar) |
+| 4 | `keyboard` | (not in this bar) |
+| 5 | `volume` | (not in this bar) |
+| 6 | `wifi` | ✅ |
+| 7 | `screenMirroring` | (not in this bar) |
+| 8 | ? (not found by guessing) | ✅ Control Center |
+
+**Focus** (`com.apple.menuextra.focusmode`) has no ID, and allowing `com.apple.controlcenter`,
+`com.apple.MenuBarAgent` and other candidate bundle IDs didn't bring it back: Focus is hidden whenever an
+assertion is active. Same presumably for other system extras outside the enum.
+
+## 4. Click forwarding ✅ and 4b. reveal-one flow ✅
+
+Verified with screenshots (`spikes/probes/assertion-flow*.swift`):
+
+| Step | Result |
+|---|---|
+| A = allow clock only | only the clock |
+| B = allow clock + Maccy, activated while A is active | Maccy fades in |
+| invalidate A | unchanged, so swap = activate new, then invalidate old, **with no flash** |
+| CGEvent click at Maccy's MenuBarAgent slot centre | Maccy's menu opens |
+| A = clock only and B = Maccy only, both active | clock **and** Maccy, so assertions combine as a **union** |
+| `AXPress` on Maccy's element from its own `AXExtrasMenuBar` | menu opens in **6 ms**, cursor untouched |
+| CGEvent click at Wi-Fi's slot (found by `com.apple.menuextra.wifi`) | Wi-Fi menu opens |
+
+- Third-party items: prefer `AXPress`; no cursor movement.
+- System items have no AX actions, so post a CGEvent click (HID tap) at the slot centre and warp the cursor back.
+- Union semantics: Accio can't hide anything another assertion holder allows (e.g. real exam mode or
+  another menu bar manager). Acceptable.
+
+## 5. Reordering ✅
+
+`spikes/probes/reorder.swift`, rotation test on 3 dummy items (rightmost → left of leftmost),
+order read from the owning app's `AXExtrasMenuBar` titles:
+
+| Drag | Result |
+|---|---|
+| ⌘ + mouse-down, 12 drag steps × 30 ms, mouse-up at target.minX + 3 | **10/10**, ~0.5 s per move |
+| 4 steps × 10 ms | 1/10 |
+
+AX order updates lag slightly behind the move; verify by polling.
+
 ## Implications for the plan
 
-- **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs, always
-  including Accio itself). Reveal all = invalidate. Reveal one = re-activate with that app added.
-  Fallback if Apple closes it: icemelt-style spacers into the system overflow.
-- **Discovery = MenuBarAgent's AX tree** (owners + system identifiers), event-driven.
-- Sections are **per app**, not per item.
-- Item images: hidden items aren't drawn, so the Bar / Search use app icons and SF Symbols for system items.
-- Still to spike: clicking an item (CGEvent at the AX slot centre), the "reveal one item and open it" flow,
-  ⌘-drag reordering, and the remaining system item IDs.
+- **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs 0–8,
+  always including Accio itself). Reveal all = invalidate. Change the set = activate the new assertion,
+  then invalidate the old one.
+- **Sections are per app**, not per item. **Focus** (and other system extras outside the enum) are hidden
+  whenever hiding is on; the UI must say so.
+- **Discovery = MenuBarAgent's AX tree**, deduplicated (the agent holds 3 windows per display),
+  event-driven. Don't trust AX for hidden state; Accio's own state is the source of truth.
+- **Open an item** = `AXPress` for apps, CGEvent click for system items. For a hidden item: add it to the
+  allow-list, wait for the ~1 s fade, click, restore when its menu closes.
+- **Reorder** = slow synthesised ⌘-drag, verified by polling.
+- **No live images** of hidden items: the Bar and Search show app icons and SF Symbols.
+- **Risk:** all of this rests on private API that Apple can gate in any update. Keep icemelt-style
+  spacers as the documented fallback, and isolate the assertion behind one small module.
