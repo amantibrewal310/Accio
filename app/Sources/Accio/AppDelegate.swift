@@ -8,7 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var standIn: StandInIcon?
     private let controller = VisibilityController.shared
     private let preferences = Preferences.shared
-    private let bar = BarController.shared
+    private let itemsMenu = HiddenItemsMenu.shared
+    /// When the user last asked to see hidden items (click, hotkey or menu),
+    /// so items that don't fit only pop up in a menu right after they asked.
+    private var lastRevealRequest = Date.distantPast
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -19,24 +22,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if change == .shortcut { self?.registerHotKey() }
             if change == .reveal { self?.revealSettingsChanged() }
         }
-        controller.onRevealChange = { [weak self] revealed in
-            self?.updateIcon()
-            if !revealed { self?.bar.closeOverflow() }
-        }
+        controller.onRevealChange = { [weak self] _ in self?.updateIcon() }
         controller.onOverflow = { [weak self] items in
-            // Items that don't fit next to the notch go to the Bar.
-            guard let self, self.preferences.revealMode == .menuBar else { return }
-            items.isEmpty ? self.bar.closeOverflow() : self.bar.show(.overflow(items))
+            // Items that don't fit next to the notch: offer them in a menu,
+            // if the user just asked for them and isn't in another menu.
+            guard let self, self.preferences.revealMode == .menuBar, !items.isEmpty,
+                  Date().timeIntervalSince(self.lastRevealRequest) < 3, !MenuBarState.isMenuOpen
+            else { return }
+            self.itemsMenu.show(.overflow(items))
         }
-        bar.onChange = { [weak self] _ in self?.updateIcon() }
-        bar.anchor = { [weak self] in self?.standIn?.visibleFrame ?? self?.statusItem?.button?.window?.frame }
+        itemsMenu.onChange = { [weak self] _ in self?.updateIcon() }
+        itemsMenu.present = { [weak self] menu in self?.popUp(menu) }
         let triggers = MenuBarTriggers.shared
         triggers.onHover = { [weak self] in self?.showItems() }
         triggers.onScroll = { [weak self] down in down ? self?.showItems() : self?.hideItems() }
         if !MenuBarHider.keepsOwnIconVisible {
             let standIn = StandInIcon()
             standIn.onClick = { [weak self] flags in self?.handleClick(flags, isRightClick: false) }
-            standIn.onMenu = { [weak self] view in self?.showMenu(from: view) }
+            standIn.onMenu = { [weak self] _ in self?.showMenu() }
             standIn.staysVisible = { [controller] item in controller.staysVisible(item) }
             self.standIn = standIn
             controller.onHidingChange = { [weak self] hiding in
@@ -77,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateIcon() {
-        let revealed = controller.isRevealed || bar.isShown
+        let revealed = controller.isRevealed || itemsMenu.isOpen
         let image = NSImage(
             systemSymbolName: revealed ? "wand.and.sparkles.inverse" : "wand.and.sparkles",
             accessibilityDescription: revealed ? "Accio: hidden items shown" : "Accio"
@@ -95,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleClick(_ flags: NSEvent.ModifierFlags, isRightClick: Bool) {
         if isRightClick || flags.contains(.control) {
-            showMenu(from: nil)
+            showMenu()
         } else {
             // ⌥: Always Hidden items too; a second ⌥-click hides again.
             toggleItems(all: flags.contains(.option))
@@ -104,15 +107,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Showing items
 
-    private var areItemsShown: Bool {
-        preferences.revealMode == .bar ? bar.isShown : controller.isRevealed
-    }
-
-    /// Show or hide hidden items, in the menu bar or the Bar as the user chose.
+    /// Show or hide hidden items, in the menu bar or a menu as the user chose.
     private func toggleItems(all: Bool) {
+        lastRevealRequest = Date()
         switch preferences.revealMode {
         case .bar:
-            bar.toggle(all: all)
+            // An open menu closes by itself on the next click or key.
+            itemsMenu.show(.hidden(all: all))
         case .menuBar:
             if !all { return controller.toggle() }
             controller.revealLevel == .all ? controller.hide() : controller.reveal(all: true)
@@ -121,28 +122,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showItems() {
         switch preferences.revealMode {
-        case .bar: if !bar.isShown { bar.show(.hidden(all: false)) }
+        case .bar: itemsMenu.show(.hidden(all: false))
         case .menuBar: controller.reveal()
         }
     }
 
     private func hideItems() {
-        switch preferences.revealMode {
-        case .bar: bar.close()
-        case .menuBar: controller.hide()
-        }
+        if preferences.revealMode == .menuBar { controller.hide() }
     }
 
     private func revealSettingsChanged() {
-        // Don't leave items out in the place the user just switched away from.
-        if preferences.revealMode == .bar { controller.hide() } else if case .hidden = bar.content { bar.close() }
+        // Don't leave items out in the menu bar after switching to the menu.
+        if preferences.revealMode == .bar { controller.hide() }
         MenuBarTriggers.shared.update(hover: preferences.revealsOnHover, scroll: preferences.revealsOnScroll)
     }
 
-    /// From the status item, or from `view` (the stand-in icon) when given.
-    private func showMenu(from view: NSView?) {
+    /// Accio's own menu (right-click).
+    private func showMenu() {
         let menu = NSMenu()
-        let toggle = ClosureMenuItem(areItemsShown ? "Hide Items" : "Show Hidden Items") { [weak self] in
+        let showsMenu = preferences.revealMode == .bar
+        let toggle = ClosureMenuItem(!showsMenu && controller.isRevealed ? "Hide Items" : "Show Hidden Items") { [weak self] in
             self?.toggleItems(all: false)
         }
         if let shortcut = preferences.revealShortcut, let key = shortcut.menuKeyEquivalent {
@@ -151,11 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         toggle.isEnabled = controller.isAvailable
         menu.addItem(toggle)
-        if preferences.revealMode == .bar ? bar.content != .hidden(all: true) : controller.revealLevel != .all {
-            let all = ClosureMenuItem("Show All Items") { [weak self] in
-                guard let self else { return }
-                self.preferences.revealMode == .bar ? self.bar.show(.hidden(all: true)) : self.controller.reveal(all: true)
-            }
+        if showsMenu || controller.revealLevel != .all {
+            let all = ClosureMenuItem("Show All Items") { [weak self] in self?.toggleItems(all: true) }
             all.isEnabled = controller.isAvailable
             menu.addItem(all)
         }
@@ -168,9 +164,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(ClosureMenuItem("Settings…", key: ",") { SettingsWindow.shared.show() })
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Quit Accio", key: "q") { NSApp.terminate(nil) })
+        popUp(menu)
+    }
 
-        if let view {
+    /// Pop `menu` up from Accio's icon: the stand-in while it's shown, else
+    /// the status item. Returns once the menu has closed.
+    private func popUp(_ menu: NSMenu) {
+        if let standIn, let view = standIn.anchorView {
+            standIn.isHighlighted = true
             menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.minY - 4), in: view)
+            standIn.isHighlighted = false
             return
         }
         // Attach the menu for this click only, so left-click keeps toggling.

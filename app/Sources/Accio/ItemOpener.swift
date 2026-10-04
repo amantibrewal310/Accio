@@ -2,10 +2,11 @@ import AppKit
 
 /// Opens an item's menu, whether it's drawn or hidden (docs/spikes.md §4, §4b).
 ///
-/// Apps' items take an `AXPress` even while hidden: the menu opens at once,
-/// hanging from where the item was last drawn. Apple's items have no AX
-/// actions, so they're shown for a moment and clicked, and hidden again
-/// once their menu closes.
+/// Most apps' items take an `AXPress` even while hidden: the menu opens at
+/// once, hanging from where the item was last drawn. Some apps (Passwords)
+/// accept the press but show nothing while their item is hidden, and Apple's
+/// items have no AX actions: those are shown for a moment and clicked, and
+/// hidden again once their menu closes.
 @MainActor
 final class ItemOpener {
     static let shared = ItemOpener()
@@ -23,7 +24,8 @@ final class ItemOpener {
         opening = item
         Task {
             defer { opening = nil }
-            if let bundleID = item.bundleID, await Self.press(item, of: bundleID, button: button) {
+            if let bundleID = item.bundleID, await Self.press(item, of: bundleID, button: button),
+               await menuAppears() {
                 return
             }
             await clickShowingItem(item, button)
@@ -78,6 +80,15 @@ final class ItemOpener {
             // A timeout means the app is busy showing its menu.
             return result == .success || result == .cannotComplete
         }.value
+    }
+
+    /// Whether a menu or popover opens within half a second.
+    private func menuAppears() async -> Bool {
+        for _ in 0..<10 {
+            if MenuBarState.isMenuOpen { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return MenuBarState.isMenuOpen
     }
 
     /// Click the item where it's drawn, showing it first if it's hidden or

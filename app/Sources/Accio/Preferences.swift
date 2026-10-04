@@ -23,9 +23,9 @@ enum ItemSection: String, CaseIterable, Identifiable, Sendable {
 
 /// Where hidden items appear when the user asks for them.
 enum RevealMode: String, CaseIterable, Identifiable, Sendable {
-    /// In the menu bar itself; items that don't fit go to the Bar.
+    /// In the menu bar itself; items that don't fit are offered in a menu.
     case menuBar
-    /// In the Bar, a panel below the menu bar; the menu bar stays as it is.
+    /// In a menu under Accio's icon; the menu bar stays as it is.
     case bar
 
     var id: String { rawValue }
@@ -33,7 +33,7 @@ enum RevealMode: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .menuBar: "In the menu bar"
-        case .bar: "In a bar below the menu bar"
+        case .bar: "In a menu"
         }
     }
 }

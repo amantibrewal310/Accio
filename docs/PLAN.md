@@ -135,18 +135,22 @@ Original plan:
 
 ### Phase 3 — The Bar (2–3 weeks) ✅ done, adapted to macOS 27
 
-As built: `BarController` shows a non-activating panel hanging from Accio's icon (right edges aligned),
-with app icons and SF Symbols (hidden items can't be captured on 27). Two modes (Settings → General):
-hidden items show **in the menu bar** (default), with revealed items that don't fit (behind the notch
-or stacked on the overflow chevron) going to the Bar automatically ("notch mode"), or **in the Bar**,
-leaving the menu bar alone. `ItemOpener` opens items: `AXPress` / `AXShowMenu` for apps' items, even
-hidden ones; Apple's items are shown for a moment (added to the allow-list, or shown alone when they
+As built: the Bar is a **standard `NSMenu`** under Accio's icon (`HiddenItemsMenu`), one row per item
+with its app icon or an SF Symbol and its name. A first version used a custom translucent panel with a
+row of icons; next to the system's monochrome glyphs it looked out of place, and hidden items can't be
+captured on 27 to draw real glyphs. (macOS's own overflow chevron doesn't use a panel either: it draws
+the extra items in the menu bar, over the app menus.) Two modes (Settings → General): hidden items show
+**in the menu bar** (default), with revealed items that don't fit (behind the notch or stacked on the
+overflow chevron) offered in the menu right after the user asked for them ("notch mode"), or **in the
+menu**, leaving the menu bar alone. ⌥ in the menu turns each row into a secondary click.
+`ItemOpener` opens items: `AXPress` / `AXShowMenu` for apps' items, even hidden ones (falling back to a
+click when an app shows nothing, like Passwords); Apple's items are shown for a moment (added to the allow-list, or shown alone when they
 don't fit), clicked, and hidden again once their menu closes. Optional triggers: resting the pointer on
-empty menu bar space, and swiping down/up on the menu bar. Esc, outside clicks and the rehide delay
-close the Bar; ←/→ and Return work in it. Main display only for now.
+empty menu bar space, and swiping down/up on the menu bar. Keyboard navigation, VoiceOver and dismissal
+come with the system menu. Main display only for now.
 
 Not done: multi-display (Accio only manages the main display's menu bar so far), and per-item titles
-in the Bar (apps with several items show the same icon for each).
+in the menu (apps with several items get numbered rows with the same icon).
 
 Original plan:
 - Borderless, non-activating `NSPanel` below the menu bar, aligned to the Accio icon or screen edge (setting).
