@@ -25,6 +25,7 @@ struct LayoutView: View {
                     Shelf(section: section, subtitle: subtitle(for: section), items: items(in: section))
                 }
                 status
+                tidy
                 Text("Hiding works per app: moving one of an app's items to another row moves all of them. Apple items with a lock, like Focus, can't stay visible while Accio hides anything.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -53,13 +54,45 @@ struct LayoutView: View {
         if let id = mover.movingID {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Moving \(registry.item(withID: id)?.name ?? "item")…")
+                Text(mover.isTidying
+                    ? "Tidying up: moving \(registry.item(withID: id)?.name ?? "an item")…"
+                    : "Moving \(registry.item(withID: id)?.name ?? "item")…")
             }
             .font(.callout)
         } else if let failure = mover.failure {
             Label(failure, systemImage: "exclamationmark.triangle")
                 .font(.callout)
                 .foregroundStyle(.orange)
+        }
+    }
+
+    /// Hidden items left of Accio and shown ones right of it keep Accio's
+    /// icon in one place when they show and hide.
+    private var tidy: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isTidy ? "checkmark.circle" : "arrow.left.arrow.right.circle")
+                .foregroundStyle(isTidy ? Color.secondary : Color.orange)
+            Text(isTidy
+                ? "Hidden items are left of Accio and shown items right of it, so the wand stays put when they show and hide."
+                : "Some items are on the wrong side of Accio, so the wand moves when hidden items show and hide. Tidy Up puts hidden items to its left and shown items to its right.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Tidy Up") { Task { await mover.tidy() } }
+                .disabled(mover.movingID != nil || !controller.isTrusted)
+        }
+    }
+
+    /// Whether every running item is on its section's side of Accio, going
+    /// by where items were last drawn.
+    private var isTidy: Bool {
+        let relevant = registry.items.filter { item in
+            item.isAccio || registry.visibleIDs.contains(item.id) || (item.bundleID != nil && registry.isRunning(item))
+        }
+        guard let accio = relevant.firstIndex(where: \.isAccio) else { return true }
+        return relevant.indices.allSatisfy { index in
+            index == accio || (preferences.section(of: relevant[index].owner) == .shown) == (index > accio)
         }
     }
 
@@ -77,7 +110,7 @@ struct LayoutView: View {
     /// bar any more are left out; hidden ones stay, so they can be shown again.
     private func items(in section: ItemSection) -> [MenuBarItem] {
         registry.items.filter { item in
-            preferences.section(of: item.owner) == section && (section != .shown || registry.isRunning(item))
+            !item.isAccio && preferences.section(of: item.owner) == section && (section != .shown || registry.isRunning(item))
         }
     }
 }
@@ -270,9 +303,13 @@ private final class LayoutDrop: ObservableObject {
         let registry = ItemRegistry.shared
         let preferences = Preferences.shared
         guard let id, let item = registry.item(withID: id), preferences.canPlace(item.owner, in: section) else { return false }
+        let wasShown = preferences.section(of: item.owner) == .shown
         preferences.setSection(section, for: item.owner)
         if let beside, beside.item.id != item.id, registry.isRunning(item), registry.isRunning(beside.item) {
             Task { await ItemMover.shared.move(item, to: beside.side, of: beside.item) }
+        } else if wasShown != (section == .shown), registry.isRunning(item) {
+            // Across Accio, so its icon stays put when the item shows and hides.
+            Task { await ItemMover.shared.tidy(only: item) }
         }
         return true
     }

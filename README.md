@@ -26,6 +26,9 @@ open build/Accio.app
 - **Settings → Layout** lists every item in three rows: Shown, Hidden, Always Hidden. Drag an item to
   another row to change when it shows; drop it onto another item to move it next to that item in the real
   menu bar. Needs Accessibility access (the first-launch window asks for it).
+- Accio keeps Hidden items to the left of its wand and Shown items to its right, so the wand stays put
+  when items show and hide. Moving an item to another row moves it across the wand; **Tidy Up** in
+  Layout arranges the whole bar.
 - Run `./scripts/dev-signing.sh` once: builds are then signed with a local identity, so macOS keeps the
   Accessibility grant across rebuilds.
 - Without an Apple-issued certificate, macOS hides Accio's own status item along with the rest

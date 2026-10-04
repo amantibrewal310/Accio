@@ -246,6 +246,20 @@ Also found while building Phase 2:
 - A borderless window with a clear background lets clicks through its fully transparent pixels. The
   stand-in only caught clicks on the glyph's strokes until it got a near-invisible fill.
 
+Found while polishing the stand-in icon:
+
+- Apple's items have about 8 pt of padding on each side of their AX frame; apps' items have none
+  (Passwords at 1060+37 ends exactly where Accio starts, Accio ends 8 pt before Display).
+- Accio's own status item can be ⌘-dragged like any other item, so it can serve as the line between
+  hidden items (left) and shown ones (right). With that layout the stand-in sits exactly where the real
+  item is drawn and nothing moves when items show and hide (checked frame by frame in a 30 fps
+  recording).
+- macOS adds and removes Apple items on its own while items show and hide (Sound when AirPods connect,
+  Display), and the clock changes width when the minute ticks: all of these shift the whole bar.
+- A click on a window that's mid-way through an `NSWindow` frame animation can get lost.
+- `AXPress` on a **hidden** app's item opens its menu straight away, without showing the item: the menu
+  hangs from the item's last on-screen position (Maccy: AX frame 1063+34 while hidden, menu at x 1020).
+
 ## Implications for the plan
 
 - **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs 0–8,
