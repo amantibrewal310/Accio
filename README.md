@@ -23,6 +23,10 @@ open build/Accio.app
 - **Click** the wand to show Hidden items, **⌥-click** to show Always Hidden items too,
   **right-click** for the menu.
 - **⌃⌥⌘A** shows Hidden items from anywhere; they hide again after 10 s (configurable).
+- **The Bar:** items that don't fit next to the notch when revealed appear in a bar below the menu bar;
+  click one to open its menu. Settings → General can show hidden items in the Bar instead of the menu
+  bar, and add two more ways to show them: resting the pointer on empty menu bar space, and swiping
+  down on the menu bar (up hides them).
 - **Settings → Layout** lists every item in three rows: Shown, Hidden, Always Hidden. Drag an item to
   another row to change when it shows; drop it onto another item to move it next to that item in the real
   menu bar. Needs Accessibility access (the first-launch window asks for it).

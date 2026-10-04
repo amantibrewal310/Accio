@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var standIn: StandInIcon?
     private let controller = VisibilityController.shared
     private let preferences = Preferences.shared
+    private let bar = BarController.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -16,8 +17,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.onChange = { [weak self] change in
             self?.controller.preferencesChanged(change)
             if change == .shortcut { self?.registerHotKey() }
+            if change == .reveal { self?.revealSettingsChanged() }
         }
-        controller.onRevealChange = { [weak self] _ in self?.updateIcon() }
+        controller.onRevealChange = { [weak self] revealed in
+            self?.updateIcon()
+            if !revealed { self?.bar.closeOverflow() }
+        }
+        controller.onOverflow = { [weak self] items in
+            // Items that don't fit next to the notch go to the Bar.
+            guard let self, self.preferences.revealMode == .menuBar else { return }
+            items.isEmpty ? self.bar.closeOverflow() : self.bar.show(.overflow(items))
+        }
+        bar.onChange = { [weak self] _ in self?.updateIcon() }
+        bar.anchor = { [weak self] in self?.standIn?.visibleFrame ?? self?.statusItem?.button?.window?.frame }
+        let triggers = MenuBarTriggers.shared
+        triggers.onHover = { [weak self] in self?.showItems() }
+        triggers.onScroll = { [weak self] down in down ? self?.showItems() : self?.hideItems() }
         if !MenuBarHider.keepsOwnIconVisible {
             let standIn = StandInIcon()
             standIn.onClick = { [weak self] flags in self?.handleClick(flags, isRightClick: false) }
@@ -31,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.start()
         registerHotKey()
+        revealSettingsChanged()
 
         if !MenuBarItems.isTrusted || !UserDefaults.standard.bool(forKey: "HasLaunched") {
             UserDefaults.standard.set(true, forKey: "HasLaunched")
@@ -61,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateIcon() {
-        let revealed = controller.isRevealed
+        let revealed = controller.isRevealed || bar.isShown
         let image = NSImage(
             systemSymbolName: revealed ? "wand.and.sparkles.inverse" : "wand.and.sparkles",
             accessibilityDescription: revealed ? "Accio: hidden items shown" : "Accio"
@@ -73,26 +89,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         // Accessibility presses (VoiceOver, AXPress) arrive without an event.
-        guard let event = NSApp.currentEvent else { return controller.toggle() }
+        guard let event = NSApp.currentEvent else { return toggleItems(all: false) }
         handleClick(event.modifierFlags, isRightClick: event.type == .rightMouseUp)
     }
 
     private func handleClick(_ flags: NSEvent.ModifierFlags, isRightClick: Bool) {
         if isRightClick || flags.contains(.control) {
             showMenu(from: nil)
-        } else if flags.contains(.option) {
-            // Always Hidden items too; a second ⌥-click hides again.
-            controller.revealLevel == .all ? controller.hide() : controller.reveal(all: true)
         } else {
-            controller.toggle()
+            // ⌥: Always Hidden items too; a second ⌥-click hides again.
+            toggleItems(all: flags.contains(.option))
         }
+    }
+
+    // MARK: Showing items
+
+    private var areItemsShown: Bool {
+        preferences.revealMode == .bar ? bar.isShown : controller.isRevealed
+    }
+
+    /// Show or hide hidden items, in the menu bar or the Bar as the user chose.
+    private func toggleItems(all: Bool) {
+        switch preferences.revealMode {
+        case .bar:
+            bar.toggle(all: all)
+        case .menuBar:
+            if !all { return controller.toggle() }
+            controller.revealLevel == .all ? controller.hide() : controller.reveal(all: true)
+        }
+    }
+
+    private func showItems() {
+        switch preferences.revealMode {
+        case .bar: if !bar.isShown { bar.show(.hidden(all: false)) }
+        case .menuBar: controller.reveal()
+        }
+    }
+
+    private func hideItems() {
+        switch preferences.revealMode {
+        case .bar: bar.close()
+        case .menuBar: controller.hide()
+        }
+    }
+
+    private func revealSettingsChanged() {
+        // Don't leave items out in the place the user just switched away from.
+        if preferences.revealMode == .bar { controller.hide() } else if case .hidden = bar.content { bar.close() }
+        MenuBarTriggers.shared.update(hover: preferences.revealsOnHover, scroll: preferences.revealsOnScroll)
     }
 
     /// From the status item, or from `view` (the stand-in icon) when given.
     private func showMenu(from view: NSView?) {
         let menu = NSMenu()
-        let toggle = ClosureMenuItem(controller.isRevealed ? "Hide Items" : "Show Hidden Items") { [controller] in
-            controller.toggle()
+        let toggle = ClosureMenuItem(areItemsShown ? "Hide Items" : "Show Hidden Items") { [weak self] in
+            self?.toggleItems(all: false)
         }
         if let shortcut = preferences.revealShortcut, let key = shortcut.menuKeyEquivalent {
             toggle.keyEquivalent = key
@@ -100,8 +151,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         toggle.isEnabled = controller.isAvailable
         menu.addItem(toggle)
-        if controller.revealLevel != .all {
-            let all = ClosureMenuItem("Show All Items") { [controller] in controller.reveal(all: true) }
+        if preferences.revealMode == .bar ? bar.content != .hidden(all: true) : controller.revealLevel != .all {
+            let all = ClosureMenuItem("Show All Items") { [weak self] in
+                guard let self else { return }
+                self.preferences.revealMode == .bar ? self.bar.show(.hidden(all: true)) : self.controller.reveal(all: true)
+            }
             all.isEnabled = controller.isAvailable
             menu.addItem(all)
         }
@@ -131,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKey?.unregister()
         hotKey = nil
         guard let shortcut = preferences.revealShortcut else { return }
-        hotKey = HotKey(shortcut) { VisibilityController.shared.toggle() }
+        hotKey = HotKey(shortcut) { [weak self] in self?.toggleItems(all: false) }
         if hotKey == nil { log("[HotKey] \(shortcut.displayString) is taken by another app") }
     }
 

@@ -145,7 +145,7 @@ final class ItemMover: ObservableObject {
         var visible: [VisibleItem] = []
         for _ in 0..<20 {
             visible = MenuBarItems.visible(includingOwn: true)
-            ItemRegistry.shared.update(visible: visible)
+            ItemRegistry.shared.update(visible: visible, everythingShown: true)
             let frames = visible.map(\.frame)
             if frames == previous, isReady(visible) { return visible }
             previous = frames
@@ -165,20 +165,9 @@ final class ItemMover: ObservableObject {
     /// Items that don't fit sit behind the notch or the overflow chevron and
     /// aren't drawn, so they can't be grabbed.
     private func notDrawnReason(_ items: VisibleItem...) -> String? {
-        let screen = NSScreen.screens.first
-        let notch: CGRect? = screen.flatMap { screen in
-            guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
-            return CGRect(x: screen.frame.minX + left.maxX, y: 0, width: right.minX - left.maxX, height: left.height)
-        }
-        let visible = MenuBarItems.visible(includingOwn: true)
-        for item in items {
-            let behindNotch = notch.map { $0.intersects(item.frame) } ?? false
-            let stacked = visible.contains { $0.item.id != item.item.id && $0.frame.intersection(item.frame).width > 2 }
-            if behindNotch || stacked {
-                return "\(item.item.name) doesn't fit in the menu bar right now, so it can't be moved. Quit an app or hide another item first."
-            }
-        }
-        return nil
+        let undrawn = MenuBarItems.undrawnIDs(in: MenuBarItems.visible(includingOwn: true))
+        guard let item = items.first(where: { undrawn.contains($0.item.id) }) else { return nil }
+        return "\(item.item.name) doesn't fit in the menu bar right now, so it can't be moved. Quit an app or hide another item first."
     }
 
     private func drag(from frame: CGRect, to end: CGPoint) async {

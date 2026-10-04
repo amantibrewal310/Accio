@@ -264,16 +264,12 @@ private struct ItemIcon: View {
             Image(nsImage: AppIcons.icon(for: bundleID))
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-        case .system(let identifier):
-            Image(systemName: item.systemItem?.symbol ?? Self.symbol(for: identifier))
+        case .system:
+            Image(systemName: item.symbolName ?? "menubar.rectangle")
                 .font(.system(size: 15, weight: .medium))
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 7).fill(.quaternary))
         }
-    }
-
-    private static func symbol(for identifier: String) -> String {
-        identifier.hasSuffix("focusmode") ? "moon.fill" : "menubar.rectangle"
     }
 }
 

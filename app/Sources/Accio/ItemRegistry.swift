@@ -16,6 +16,10 @@ final class ItemRegistry: ObservableObject {
     @Published private(set) var visibleIDs: Set<String> = []
     /// Running apps with menu bar items (bundle ID → item count), hidden or not.
     @Published private(set) var runningApps: [String: Int] = [:]
+    /// Apple items that weren't in the bar the last time everything was
+    /// shown. macOS adds some only in some states (Focus, Sound), and hidden
+    /// items aren't drawn, so that's the only time to tell.
+    @Published private(set) var absentSystemIDs: Set<String> = []
 
     private static let key = "KnownItems"
 
@@ -29,6 +33,11 @@ final class ItemRegistry: ObservableObject {
         items.first { $0.id == id }
     }
 
+    /// Whether the item is in the menu bar now, drawn or hidden.
+    func isPresent(_ item: MenuBarItem) -> Bool {
+        item.bundleID == nil ? !absentSystemIDs.contains(item.id) : isRunning(item)
+    }
+
     func isRunning(_ item: MenuBarItem) -> Bool {
         // Apple's items belong to the system, which is always running.
         guard let bundleID = item.bundleID else { return true }
@@ -37,10 +46,14 @@ final class ItemRegistry: ObservableObject {
 
     /// Record what's drawn now. Visible items take their on-screen order;
     /// every other known item keeps its place right after the item it
-    /// followed before.
-    func update(visible: [VisibleItem]) {
+    /// followed before. `everythingShown` when nothing is being hidden.
+    func update(visible: [VisibleItem], everythingShown: Bool = false) {
         let live = visible.map(\.item)
         visibleIDs = Set(live.map(\.id))
+        if everythingShown {
+            let absent = Set(items.filter { $0.bundleID == nil }.map(\.id)).subtracting(visibleIDs)
+            if absent != absentSystemIDs { absentSystemIDs = absent }
+        }
         var merged = live
         var lastPlaced = -1
         for item in items {
@@ -62,8 +75,8 @@ final class ItemRegistry: ObservableObject {
         for app in apps {
             // Forget items the app no longer has.
             merged.removeAll { item in
-                guard item.bundleID == app.bundleID, let index = Self.index(of: item) else { return false }
-                return index >= app.itemCount && !visibleIDs.contains(item.id)
+                guard item.bundleID == app.bundleID else { return false }
+                return item.appIndex >= app.itemCount && !visibleIDs.contains(item.id)
             }
             for i in merged.indices where merged[i].bundleID == app.bundleID {
                 merged[i].name = app.name
@@ -82,10 +95,6 @@ final class ItemRegistry: ObservableObject {
         guard merged != items else { return }
         items = merged
         UserDefaults.standard.set(merged.map(Self.encode), forKey: Self.key)
-    }
-
-    private static func index(of item: MenuBarItem) -> Int? {
-        item.id.split(separator: "#").last.flatMap { Int($0) }
     }
 
     // MARK: Storage
