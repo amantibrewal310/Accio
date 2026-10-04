@@ -126,6 +126,26 @@ enum MenuBarItems {
         }
     }
 
+    /// Where Accio's own status item is drawn, while it's drawn.
+    static func ownItemFrame() -> CGRect? {
+        guard
+            isTrusted,
+            let agent = NSRunningApplication.runningApplications(withBundleIdentifier: agentBundleID).first
+        else { return nil }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let app = AXUIElementCreateApplication(agent.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        for window in AX.children(app, kAXWindowsAttribute) {
+            for slot in AX.children(window) {
+                guard let owner = AX.children(slot).first, AX.pid(owner) == ownPID,
+                      let frame = AX.frame(slot), frame.width > 0, frame.minY < 4
+                else { continue }
+                return frame
+            }
+        }
+        return nil
+    }
+
     /// Running apps that own menu bar items, by asking each app for its
     /// `AXExtrasMenuBar`. Unlike `visible()`, this also sees apps whose items
     /// are hidden. Takes ~100 ms, so call it off the main thread.

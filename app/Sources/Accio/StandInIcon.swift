@@ -18,8 +18,13 @@ final class StandInIcon {
     /// Whether an item stays drawn while hiding, so the icon can go straight
     /// to where the bar will settle instead of following the fade.
     var staysVisible: ((MenuBarItem) -> Bool)?
-    /// Bumped on every show/hide, so a finished fade-out doesn't hide a re-shown icon.
+    /// Bumped on every show/hide, so a finished animation doesn't act on a newer state.
     private var generation = 0
+    /// Where the real status item was last drawn, so the icon can hand over
+    /// to it there when hiding stops.
+    private var ownItemFrame: CGRect?
+    /// While the icon glides between the real item's place and its own.
+    private var isGliding = false
 
     /// Matches a square status item on a notched display.
     private static let width: CGFloat = 38
@@ -60,20 +65,39 @@ final class StandInIcon {
         generation += 1
         let generation = generation
         guard visible else {
-            // Fade out while the real status item fades in.
+            // Glide to where the real status item fades back in, then leave
+            // it there, so it looks like one icon moving with the bar.
             guard panel.isVisible else { return }
-            fade(to: 0) { [weak self] in
-                guard let self, self.generation == generation else { return }
-                self.panel.orderOut(nil)
+            if let own = ownItemFrame {
+                // Head for where it was last; correct once it's drawn.
+                glide(to: own.minX) { [weak self] in self?.handOver(generation, until: .now + .seconds(1)) }
+            } else {
+                handOver(generation, until: .now + .seconds(1))
             }
             return
         }
         button.image = image
-        reposition()
-        if !panel.isVisible || panel.alphaValue < 1 {
-            if !panel.isVisible { panel.alphaValue = 0 }
+        let wasVisible = panel.isVisible && panel.alphaValue == 1
+        if !wasVisible, let own = MenuBarItems.ownItemFrame() {
+            // Hiding starts: take over from the real item where it is drawn,
+            // then glide along as the hidden items fade out.
+            ownItemFrame = own
+            panel.alphaValue = 1
+            panel.setFrame(frame(atX: own.minX), display: true)
             panel.orderFrontRegardless()
-            fade(to: 1)
+            if let target = targetX() {
+                glide(to: target) { [weak self] in
+                    guard let self, self.generation == generation else { return }
+                    self.reposition()
+                }
+            }
+        } else {
+            reposition()
+            if !wasVisible {
+                panel.alphaValue = 0
+                panel.orderFrontRegardless()
+                fade(to: 1)
+            }
         }
         barObserver.start()
         // A backstop for changes the observer misses, and for a restarted
@@ -87,9 +111,55 @@ final class StandInIcon {
         refreshTimer?.tolerance = 2
     }
 
+    /// Once the real status item is drawn again, glide onto it and leave it
+    /// there. It reappears within a few hundred ms; give up after `deadline`.
+    private func handOver(_ generation: Int, until deadline: ContinuousClock.Instant) {
+        guard self.generation == generation else { return }
+        let done: @MainActor () -> Void = { [weak self] in
+            guard let self, self.generation == generation else { return }
+            self.panel.orderOut(nil)
+            self.panel.alphaValue = 1
+        }
+        if let own = MenuBarItems.ownItemFrame() {
+            ownItemFrame = own
+            glide(to: own.minX, completion: done)
+        } else if ContinuousClock.now >= deadline {
+            fade(to: 0, completion: done)
+        } else {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                self?.handOver(generation, until: deadline)
+            }
+        }
+    }
+
+    private static var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Slide to `x` at about the pace of the system's item fade.
+    private func glide(to x: CGFloat, completion: @escaping @MainActor () -> Void) {
+        let target = frame(atX: x)
+        guard !Self.reduceMotion, abs(panel.frame.minX - x) > 1 else {
+            panel.setFrame(target, display: true)
+            return completion()
+        }
+        isGliding = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(target, display: true)
+        } completionHandler: {
+            MainActor.assumeIsolated {
+                self.isGliding = false
+                completion()
+            }
+        }
+    }
+
     /// Matches the speed of the system's item fade.
     private func fade(to alpha: CGFloat, completion: (@MainActor () -> Void)? = nil) {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+        guard !Self.reduceMotion else {
             panel.alphaValue = alpha
             completion?()
             return
@@ -103,40 +173,48 @@ final class StandInIcon {
     }
 
     private func reposition() {
-        guard let screen = NSScreen.screens.first else { return }
-        let height = max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
-        // Left of the leftmost visible item, but never behind the notch.
-        // Without Accessibility, just right of the notch (or the middle):
-        // shown items are right-aligned, so that spot is usually free.
+        guard !isGliding, let x = targetX() else { return }
+        if let screen = NSScreen.screens.first { button.tint = MenuBarTint.glyphColor(on: screen) }
+        let frame = frame(atX: x)
+        if panel.frame != frame { panel.setFrame(frame, display: true) }
+    }
+
+    /// Left of the leftmost item once the bar settles, but never behind the
+    /// notch. Without Accessibility, just right of the notch (or the
+    /// middle): shown items are right-aligned, so that spot is usually free.
+    private func targetX() -> CGFloat? {
+        guard let screen = NSScreen.screens.first else { return nil }
         let notchRight = screen.auxiliaryTopRightArea.map { screen.frame.minX + $0.minX }
         var x = settledLeftEdge().map { $0 - Self.width }
             ?? notchRight.map { $0 + 4 } ?? screen.frame.midX
         if let notchRight { x = max(x, notchRight) }
-        let frame = NSRect(x: x, y: screen.frame.maxY - height, width: Self.width, height: height)
-        button.tint = MenuBarTint.glyphColor(on: screen)
-        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        return x
+    }
+
+    private func frame(atX x: CGFloat) -> NSRect {
+        guard let screen = NSScreen.screens.first else { return panel.frame }
+        let height = max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
+        return NSRect(x: x, y: screen.frame.maxY - height, width: Self.width, height: height)
     }
 }
 
 extension StandInIcon {
     /// x of the leftmost item once the bar has settled. Items are packed
-    /// against the right end with even gaps, so add up the widths of the
-    /// items that stay, starting from the right end. Right after hiding
-    /// starts, the hidden items are still drawn and would put the icon too
-    /// far left.
+    /// against the right end, so add up the room each staying item takes
+    /// (its distance to its right neighbour: Apple's items have 16 pt gaps,
+    /// apps' items none). Right after hiding starts, the hidden items are
+    /// still drawn and would put the icon too far left.
     private func settledLeftEdge() -> CGFloat? {
         let visible = MenuBarItems.visible()
         guard let right = visible.map(\.frame.maxX).max() else { return nil }
-        let staying = visible.filter { staysVisible?($0.item) ?? true }
-        guard !staying.isEmpty else { return nil }
-        // The gap between neighbouring slots (16 pt on macOS 27).
-        let gaps = zip(visible, visible.dropFirst())
-            .map { $1.frame.minX - $0.frame.maxX }
-            .filter { $0 >= 0 && $0 < 40 }
-            .sorted()
-        let gap = gaps.isEmpty ? 16 : gaps[gaps.count / 2]
-        let widths = staying.reduce(0) { $0 + $1.frame.width }
-        return right - widths - gap * CGFloat(staying.count - 1)
+        var room: CGFloat = 0
+        var anyStaying = false
+        for (index, item) in visible.enumerated() where staysVisible?(item.item) ?? true {
+            anyStaying = true
+            let next = index + 1 < visible.count ? visible[index + 1].frame.minX : item.frame.maxX
+            room += next - item.frame.minX
+        }
+        return anyStaying ? right - room : nil
     }
 }
 
