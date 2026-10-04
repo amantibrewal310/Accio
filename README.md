@@ -5,8 +5,30 @@
 A lightweight, polished, open-source menu bar manager for macOS. It hides the icons you rarely use,
 brings any of them back on demand, and keeps them out from behind the notch.
 
-> **Status:** Phase 2. Hides the menu bar items you choose (Hidden / Always Hidden), brings them back on
-> demand, and rearranges the real menu bar from a drag-and-drop layout editor.
+> **Status:** Phase 3. Hides the menu bar items you choose (Hidden / Always Hidden), brings them back on
+> demand (in the menu bar or in a menu), opens hidden items without showing them, and rearranges the
+> real menu bar from a drag-and-drop layout editor.
+
+## Install
+
+```bash
+brew install --cask amantibrewal310/tap/accio
+```
+
+Apple Silicon, macOS 26 (Tahoe) or newer. Accio isn't notarized by Apple (no paid developer account),
+so macOS blocks its first launch: open it once, then click **Open Anyway** in System Settings →
+Privacy & Security. Accio then asks for Accessibility access, which it uses to see and arrange your
+menu bar items.
+
+## Release
+
+```bash
+./scripts/release.sh          # tags VERSION, uploads dist/Accio-<version>.zip, updates the tap
+```
+
+Releases are signed with the local identity from `scripts/dev-signing.sh`. macOS ties the
+Accessibility grant to that certificate, so keep it (`~/Library/Keychains/accio-dev.keychain-db`):
+releases signed with another one make every user grant Accessibility again.
 
 ## Docs
 
