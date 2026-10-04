@@ -16,6 +16,8 @@ final class VisibilityController: ObservableObject {
     var isAvailable: Bool { hider != nil }
 
     var onRevealChange: (@MainActor (Bool) -> Void)?
+    /// Called after every apply, with whether items are being hidden now.
+    var onHidingChange: (@MainActor (Bool) -> Void)?
 
     private let hider = MenuBarHider()
     private let preferences = Preferences.shared
@@ -71,6 +73,7 @@ final class VisibilityController: ObservableObject {
         } else {
             hider.hide(allowing: allowList())
         }
+        onHidingChange?(hider.isHiding)
     }
 
     func preferencesChanged(_ change: Preferences.Change) {
@@ -221,6 +224,52 @@ enum MenuBarState {
     /// The menu bar's height on the screen under the mouse.
     private static func menuBarHeight(of screen: NSScreen) -> CGFloat {
         max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
+    }
+
+    /// x of the leftmost status item still showing on `screen`, read from
+    /// MenuBarAgent's AX tree (needs Accessibility). Ignores Accio's own item.
+    static func leftmostVisibleItemX(on screen: NSScreen) -> CGFloat? {
+        guard
+            MenuBarApps.isTrusted,
+            let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.MenuBarAgent").first
+        else { return nil }
+        let app = AXUIElementCreateApplication(agent.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        var leftmost: CGFloat?
+        for window in axChildren(app, kAXWindowsAttribute) {
+            for slot in axChildren(window, kAXChildrenAttribute) {
+                guard let frame = axFrame(slot), frame.width > 0, frame.minY < 4,
+                      frame.minX >= screen.frame.minX, frame.minX < screen.frame.maxX
+                else { continue }
+                var pid: pid_t = 0
+                if let owner = axChildren(slot, kAXChildrenAttribute).first { AXUIElementGetPid(owner, &pid) }
+                guard pid != ownPID else { continue }
+                leftmost = min(leftmost ?? frame.minX, frame.minX)
+            }
+        }
+        return leftmost
+    }
+
+    private static func axChildren(_ element: AXUIElement, _ attribute: String) -> [AXUIElement] {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return [] }
+        return value as? [AXUIElement] ?? []
+    }
+
+    private static func axFrame(_ element: AXUIElement) -> CGRect? {
+        var position: CFTypeRef?
+        var size: CFTypeRef?
+        guard
+            AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
+            AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+            let position, let size
+        else { return nil }
+        var point = CGPoint.zero
+        var extent = CGSize.zero
+        AXValueGetValue(position as! AXValue, .cgPoint, &point)
+        AXValueGetValue(size as! AXValue, .cgSize, &extent)
+        return CGRect(origin: point, size: extent)
     }
 
     static var isMouseInMenuBar: Bool {

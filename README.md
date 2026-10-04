@@ -22,9 +22,11 @@ open build/Accio.app
 - **Click** the wand to show or hide items, **right-click** it for the menu, **⌥-click** for Settings.
 - **⌃⌥⌘A** shows hidden items from anywhere; they hide again after 10 s (configurable).
 - Choose what's hidden in **Settings → Menu Bar Items**. Listing apps needs Accessibility access.
-- Ad-hoc builds hide their own icon too ([why](docs/spikes.md#1d-the-allow-list-needs-a-team-signature--found-in-phase-1)).
-  Set `ACCIO_SIGN_IDENTITY` to a signing identity to avoid that, and to keep the Accessibility grant
-  across rebuilds.
+- Run `./scripts/dev-signing.sh` once: builds are then signed with a local identity, so macOS keeps the
+  Accessibility grant across rebuilds.
+- Without an Apple-issued certificate, macOS hides Accio's own status item along with the rest
+  ([why](docs/spikes.md#1d-the-allow-list-needs-a-team-signature--found-in-phase-1)), so Accio draws a
+  stand-in icon in the menu bar while hiding. It works the same way.
 
 ## Spikes
 

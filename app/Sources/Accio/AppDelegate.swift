@@ -4,6 +4,8 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKey: HotKey?
+    /// Stands in for the status item when the build can't keep it visible.
+    private var standIn: StandInIcon?
     private let controller = VisibilityController.shared
     private let preferences = Preferences.shared
 
@@ -16,6 +18,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if change == .shortcut { self?.registerHotKey() }
         }
         controller.onRevealChange = { [weak self] _ in self?.updateIcon() }
+        if !MenuBarHider.keepsOwnIconVisible {
+            let standIn = StandInIcon()
+            standIn.onClick = { [weak self] flags in self?.handleClick(flags, isRightClick: false) }
+            standIn.onMenu = { [weak self] view in self?.showMenu(from: view) }
+            self.standIn = standIn
+            controller.onHidingChange = { [weak self] hiding in
+                guard let self else { return }
+                self.standIn?.setVisible(hiding, image: self.statusItem?.button?.image)
+            }
+        }
         controller.start()
         registerHotKey()
 
@@ -60,16 +72,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         // Accessibility presses (VoiceOver, AXPress) arrive without an event.
         guard let event = NSApp.currentEvent else { return controller.toggle() }
-        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
-            showMenu()
-        } else if event.modifierFlags.contains(.option) {
+        handleClick(event.modifierFlags, isRightClick: event.type == .rightMouseUp)
+    }
+
+    private func handleClick(_ flags: NSEvent.ModifierFlags, isRightClick: Bool) {
+        if isRightClick || flags.contains(.control) {
+            showMenu(from: nil)
+        } else if flags.contains(.option) {
             SettingsWindow.shared.show()
         } else {
             controller.toggle()
         }
     }
 
-    private func showMenu() {
+    /// From the status item, or from `view` (the stand-in icon) when given.
+    private func showMenu(from view: NSView?) {
         let menu = NSMenu()
         let toggle = ClosureMenuItem(controller.isRevealed ? "Hide Items" : "Show Hidden Items") { [controller] in
             controller.toggle()
@@ -90,6 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Quit Accio", key: "q") { NSApp.terminate(nil) })
 
+        if let view {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.minY - 4), in: view)
+            return
+        }
         // Attach the menu for this click only, so left-click keeps toggling.
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)

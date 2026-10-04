@@ -3,9 +3,17 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$PROJECT_ROOT/VERSION")"
-# Set ACCIO_SIGN_IDENTITY to a code signing identity so macOS keeps the
-# Accessibility grant across rebuilds; ad-hoc builds must be re-granted.
+# Signing identity: ACCIO_SIGN_IDENTITY, else the local one from
+# scripts/dev-signing.sh, else ad-hoc. Any stable identity lets macOS keep
+# the Accessibility grant across rebuilds; ad-hoc builds must be re-granted.
+DEV_KEYCHAIN="$HOME/Library/Keychains/accio-dev.keychain-db"
 SIGN_IDENTITY="${ACCIO_SIGN_IDENTITY:--}"
+SIGN_ARGS=()
+if [ -z "$ACCIO_SIGN_IDENTITY" ] && [ -f "$DEV_KEYCHAIN" ]; then
+    security unlock-keychain -p accio-dev "$DEV_KEYCHAIN"
+    SIGN_IDENTITY="Accio Local Development"
+    SIGN_ARGS=(--keychain "$DEV_KEYCHAIN")
+fi
 
 echo "🍏 Step 1/2: Building Swift App (Accio)..."
 cd "$PROJECT_ROOT/app"
@@ -52,7 +60,7 @@ cat << PLIST > "$CONTENTS_DIR/Info.plist"
 </plist>
 PLIST
 
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+codesign --force --deep "${SIGN_ARGS[@]}" --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
 
 echo "✨ Build succeeded! App bundle created and signed at:"
 echo "   $APP_BUNDLE"
