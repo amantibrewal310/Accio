@@ -48,20 +48,10 @@ private struct ItemsView: View {
                     Label("This version of macOS doesn't let Accio hide menu bar items.", systemImage: "exclamationmark.triangle")
                 }
             }
-            if controller.isAvailable, !MenuBarHider.keepsOwnIconVisible {
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("This build of Accio isn't signed, so its own icon hides along with the rest.", systemImage: "eye.slash")
-                        Text(revealHint)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
             if !controller.isTrusted {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Accio needs Accessibility access to see which apps have menu bar items.", systemImage: "lock")
+                        Label("Accio needs Accessibility access to see which apps have menu bar items, and where they are.", systemImage: "lock")
                         Text("Hiding works without it, but the list below stays empty until access is granted.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -100,25 +90,8 @@ private struct ItemsView: View {
         }
         .formStyle(.grouped)
         .onReceive(trustPoll) { _ in
-            if controller.isAvailable, !MenuBarHider.keepsOwnIconVisible {
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("This build of Accio isn't signed, so its own icon hides along with the rest.", systemImage: "eye.slash")
-                        Text(revealHint)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
             if !controller.isTrusted { controller.refreshTrust() }
         }
-    }
-
-    private var revealHint: String {
-        guard let shortcut = preferences.revealShortcut else {
-            return "Set a shortcut in General to show hidden items, or open Accio again to get back here."
-        }
-        return "Press \(shortcut.displayString) to show hidden items, or open Accio again to get back here."
     }
 
     /// Running menu bar apps, plus hidden apps that aren't running right now.

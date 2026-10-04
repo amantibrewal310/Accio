@@ -244,5 +244,6 @@ macOS internals here are undocumented and changed in 26. Before writing the real
 
 Still open:
 1. **Apple Developer account** for signing and notarization (needed by Phase 5). Now also needed for
-   daily use: ad-hoc builds hide their own icon, because the allow-list ignores apps without a team
-   signature (`docs/spikes.md` §1d).
+   daily use: unsigned builds hide their own icon, because the allow-list ignores apps without a team
+   signature (`docs/spikes.md` §1d). **Decided: no paid account for now.** Accio draws a stand-in
+   icon instead, and `scripts/dev-signing.sh` keeps the Accessibility grant across rebuilds.

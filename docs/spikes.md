@@ -134,12 +134,18 @@ Tested from a separate process, so the assertion holder doesn't matter:
 | `Accio.app` (`build/` or `/tmp`, registered with `lsregister`) | ad-hoc | ❌ hidden |
 | A minimal ad-hoc test bundle (`com.accio.dummy`) | ad-hoc | ❌ hidden |
 
+A **self-signed** certificate doesn't help either (tested: `TeamIdentifier=not set`, still hidden). Only
+Apple-issued certificates carry a team ID: Developer ID ($99/yr) or the free "Apple Development"
+certificate that Xcode creates for any Apple ID (needs Xcode; not tested).
+
 Consequences:
 
-- An ad-hoc build of Accio **hides its own icon** whenever it hides anything. It still works through
-  the hotkey (and Settings opens when Accio is launched again), and Settings says so.
-- Signing with a team identity (Developer ID, or probably a free "Apple Development" certificate) should
-  fix it. Not verified yet.
+- Accio's own status item hides whenever Accio hides anything. Accio works around it with a
+  **stand-in icon**: a small borderless panel at status-bar level, placed left of the leftmost visible
+  item (MenuBarAgent AX tree), or just right of the notch without Accessibility. The assertion only
+  hides status items, so the panel stays. Its glyph colour is taken from the wallpaper's top strip when
+  the picture is in an unprotected location; reading one from ~/Downloads etc. triggers a privacy prompt,
+  so those fall back to white.
 - Users' own ad-hoc signed apps (local builds, some Homebrew apps) can't be kept visible while hiding.
 
 ## 2c. MenuBarAgent AX tree ✅
