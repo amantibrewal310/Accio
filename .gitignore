@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+.build/
+dist/
+
+# macOS metadata
+.DS_Store
+*.swp
+*~
+
+# Swift / Xcode artifacts
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+.swiftpm/
