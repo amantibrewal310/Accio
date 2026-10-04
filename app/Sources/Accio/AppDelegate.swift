@@ -42,6 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             standIn.onMenu = { [weak self] _ in self?.showMenu() }
             standIn.staysVisible = { [controller] item in controller.staysVisible(item) }
             self.standIn = standIn
+            let presence = MenuBarPresence.shared
+            presence.onChange = { [weak self] shown in self?.standIn?.isMenuBarShown = shown }
+            presence.start()
+            standIn.isMenuBarShown = presence.isShown
             controller.onHidingChange = { [weak self] hiding in
                 guard let self else { return }
                 self.standIn?.setVisible(hiding, image: self.statusItem?.button?.image)
