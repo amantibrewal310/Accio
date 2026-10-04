@@ -90,6 +90,15 @@ final class VisibilityController: ObservableObject {
         onHidingChange?(hider.isHiding)
     }
 
+    /// Whether `item` is drawn while the current assertion holds.
+    func staysVisible(_ item: MenuBarItem) -> Bool {
+        guard let hider, hider.isHiding, let allowList = hider.allowList else { return true }
+        switch item.owner {
+        case .app(let bundleID): return allowList.bundleIDs.contains(bundleID)
+        case .system: return item.systemItem.map(allowList.systemItems.contains) ?? false
+        }
+    }
+
     func beginMove() {
         isMoving = true
         apply()
@@ -254,12 +263,6 @@ enum MenuBarState {
     /// The menu bar's height on the screen under the mouse.
     private static func menuBarHeight(of screen: NSScreen) -> CGFloat {
         max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
-    }
-
-    /// x of the leftmost item still showing on the main display (needs
-    /// Accessibility). Ignores Accio's own item.
-    static func leftmostVisibleItemX() -> CGFloat? {
-        MenuBarItems.visible().first?.frame.minX
     }
 
     static var isMouseInMenuBar: Bool {
