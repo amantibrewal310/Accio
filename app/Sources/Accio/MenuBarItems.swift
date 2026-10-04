@@ -219,3 +219,84 @@ enum AX {
         return pid
     }
 }
+
+/// Calls `onChange` soon after MenuBarAgent's items appear, disappear, move
+/// or resize, through AX notifications (needs Accessibility). Bursts are
+/// coalesced into one call.
+@MainActor
+final class MenuBarObserver {
+    private let onChange: @MainActor () -> Void
+    private var observer: AXObserver?
+    private var agentPID: pid_t = 0
+    private var isPending = false
+
+    private static let appNotifications = [
+        kAXCreatedNotification, kAXUIElementDestroyedNotification, kAXLayoutChangedNotification,
+    ]
+    private static let windowNotifications = [
+        kAXMovedNotification, kAXResizedNotification, kAXValueChangedNotification,
+    ]
+
+    init(onChange: @escaping @MainActor () -> Void) {
+        self.onChange = onChange
+    }
+
+    var isRunning: Bool { observer != nil }
+
+    /// Starts observing, or re-attaches if MenuBarAgent was restarted.
+    func start() {
+        guard
+            MenuBarItems.isTrusted,
+            let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.MenuBarAgent").first
+        else { return stop() }
+        guard observer == nil || agent.processIdentifier != agentPID else { return }
+        stop()
+        var observer: AXObserver?
+        let callback: AXObserverCallback = { _, element, notification, refcon in
+            guard let refcon else { return }
+            let this = Unmanaged<MenuBarObserver>.fromOpaque(refcon).takeUnretainedValue()
+            let windowAppeared = notification as String == kAXCreatedNotification
+            MainActor.assumeIsolated {
+                if windowAppeared { this.observeWindows() }
+                this.changed()
+            }
+        }
+        guard AXObserverCreate(agent.processIdentifier, callback, &observer) == .success, let observer else { return }
+        self.observer = observer
+        agentPID = agent.processIdentifier
+        let app = AXUIElementCreateApplication(agentPID)
+        for name in Self.appNotifications { add(name, to: app) }
+        observeWindows()
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+    }
+
+    func stop() {
+        guard let observer else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+        self.observer = nil
+    }
+
+    /// Item frames are reported on the agent's windows, which come and go.
+    /// Adding a window twice is harmless.
+    private func observeWindows() {
+        let app = AXUIElementCreateApplication(agentPID)
+        for window in AX.children(app, kAXWindowsAttribute) {
+            for name in Self.windowNotifications { add(name, to: window) }
+        }
+    }
+
+    private func add(_ name: String, to element: AXUIElement) {
+        guard let observer else { return }
+        AXObserverAddNotification(observer, element, name as CFString, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    private func changed() {
+        guard !isPending else { return }
+        isPending = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(40))
+            self.isPending = false
+            if self.observer != nil { self.onChange() }
+        }
+    }
+}

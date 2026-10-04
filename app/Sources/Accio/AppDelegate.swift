@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let standIn = StandInIcon()
             standIn.onClick = { [weak self] flags in self?.handleClick(flags, isRightClick: false) }
             standIn.onMenu = { [weak self] view in self?.showMenu(from: view) }
+            standIn.staysVisible = { [controller] item in controller.staysVisible(item) }
             self.standIn = standIn
             controller.onHidingChange = { [weak self] hiding in
                 guard let self else { return }

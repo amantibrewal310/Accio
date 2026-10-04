@@ -238,6 +238,11 @@ Also found while building Phase 2:
 - `AXImageData` exists on the battery item only, so it's no source of item images.
 - macOS shows some Apple items only in some states: Display was drawn while an assertion was active and
   gone once everything was shown, with Focus in its place.
+- MenuBarAgent posts AX notifications (`AXCreated`, `AXUIElementDestroyed`, `AXLayoutChanged` on the app;
+  `AXMoved`, `AXResized`, `AXValueChanged` on its windows) when items appear, go or move. The bar keeps
+  changing for seconds after hiding starts (Display can appear ~2–4 s later), so the stand-in follows these
+  notifications instead of re-checking on a timer, and starts at the predicted settled position: items are
+  packed against the right end with 16 pt gaps, so the staying items' widths give the final left edge.
 - A borderless window with a clear background lets clicks through its fully transparent pixels. The
   stand-in only caught clicks on the glyph's strokes until it got a near-invisible fill.
 
