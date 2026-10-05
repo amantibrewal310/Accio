@@ -77,6 +77,14 @@ private struct OnboardingView: View {
                     title: "Bring them back",
                     detail: revealDetail
                 )
+                if let search = Preferences.shared.searchShortcut {
+                    Step(
+                        systemImage: "magnifyingglass",
+                        tint: .accentColor,
+                        title: "Find any item",
+                        detail: "Press \(search.displayString) and type an item's name to open its menu, even if it's hidden."
+                    )
+                }
             }
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.5)))

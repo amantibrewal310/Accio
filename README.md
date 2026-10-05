@@ -5,9 +5,10 @@
 A lightweight, polished, open-source menu bar manager for macOS. It hides the icons you rarely use,
 brings any of them back on demand, and keeps them out from behind the notch.
 
-> **Status:** Phase 3 done. Hides the menu bar items you choose (Hidden / Always Hidden), brings them
-> back on demand (in the menu bar or in a menu), opens hidden items without showing them, and rearranges
-> the real menu bar from a drag-and-drop layout editor. Works on every display's menu bar.
+> **Status:** Phase 4 done. Hides the menu bar items you choose (Hidden / Always Hidden), brings them
+> back on demand (in the menu bar or in a menu), opens hidden items without showing them, finds any item
+> by name, and rearranges the real menu bar from a drag-and-drop layout editor. Works on every display's
+> menu bar.
 
 ## Install
 
@@ -49,6 +50,9 @@ open build/Accio.app
 - **Click** the wand to show Hidden items, **⌥-click** to show Always Hidden items too,
   **right-click** for the menu.
 - **⌃⌥⌘A** shows Hidden items from anywhere; they hide again after 10 s (configurable).
+- **⌥Space** searches the menu bar: type part of an item's name and press Return to open its menu,
+  hidden or not (⌥Return for a secondary click). **Settings → Shortcuts** changes both shortcuts and can
+  give any item its own, e.g. ⌃⌥W for Wi-Fi.
 - **Hidden items menu:** if revealed items don't fit next to the notch, Accio lists them in a menu under
   its icon; choose one to open it (hold ⌥ for a secondary click). Settings → General can show hidden
   items in that menu instead of the menu bar, and add two more ways to show them: resting the pointer on

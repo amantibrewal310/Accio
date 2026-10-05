@@ -164,7 +164,20 @@ Original plan:
 - **Notch mode:** items that would land behind the notch are automatically shown in the Bar instead.
 - Multi-display: Bar opens on the display with the active menu bar.
 
-### Phase 4 — Search + per-item hotkeys (1–2 weeks)
+### Phase 4 — Search + per-item hotkeys (1–2 weeks) ✅ done
+
+As built: **⌥Space** (configurable) opens `SearchPanel`, a non-activating glass panel on the display
+under the pointer, so the frontmost app keeps its menus and the room they leave next to the notch. It
+lists every item in the menu bar now, shown or hidden, recently opened ones first; typing ranks them by
+`FuzzyMatch` (letters in order; prefix, word-start and consecutive matches score higher; case, accents
+and punctuation ignored, so "wifi" finds Wi-Fi) over the label, app name and AX title, plus a few
+keywords for Apple's items ("brightness" finds Display). ↑↓ or ⌃P/⌃N move, Return opens through
+`ItemOpener`, ⌥Return is a secondary click, Esc clears then closes; clicking away closes it. VoiceOver
+hears the selection as an announcement, since its focus stays in the field. Settings → **Shortcuts**
+holds the reveal and search shortcuts and one per item (`ShortcutCenter` registers them); recording a
+shortcut that's in use moves it and says so. A shortcut for an item that isn't running beeps.
+
+Original plan:
 - Spotlight-style panel (hotkey), fuzzy match on app name / item title, ↑↓ + Return to open the item's menu.
 - Assign a hotkey to any individual item ("open Wi-Fi menu with ⌃⌥W").
 - Fully keyboard-navigable; VoiceOver labels.

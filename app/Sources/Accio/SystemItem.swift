@@ -61,6 +61,21 @@ enum SystemItem: Int, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Other words people search for it by.
+    var keywords: [String] {
+        switch self {
+        case .battery: ["power", "charge"]
+        case .bluetooth: ["headphones", "airpods"]
+        case .clock: ["time", "date", "calendar"]
+        case .displays: ["brightness", "screen", "monitor", "night shift"]
+        case .keyboard: ["backlight"]
+        case .volume: ["volume", "audio", "speaker", "output"]
+        case .wifi: ["network", "wireless", "internet"]
+        case .screenMirroring: ["airplay", "mirror"]
+        case .controlCenter: ["settings"]
+        }
+    }
+
     /// Shown unless the user hides them: the clock and Control Center are
     /// where people look first.
     static let defaultShown: Set<SystemItem> = [.battery, .clock, .wifi, .controlCenter]
