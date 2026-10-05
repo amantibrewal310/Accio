@@ -41,9 +41,10 @@ private struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 22) {
             VStack(spacing: 10) {
-                Image(systemName: "wand.and.sparkles")
-                    .font(.system(size: 44, weight: .light))
-                    .foregroundStyle(.tint)
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 72, height: 72)
+                    .accessibilityHidden(true)
                 Text("Welcome to Accio").font(.title.weight(.semibold))
                 Text("Accio tidies your menu bar: it hides the items you don't need all the time, and brings them back when you ask.")
                     .multilineTextAlignment(.center)

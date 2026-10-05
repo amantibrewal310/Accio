@@ -33,6 +33,16 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$PROJECT_ROOT/app/.build/release/Accio" "$MACOS_DIR/Accio"
 strip "$MACOS_DIR/Accio"
 
+# App icon: every size macOS asks for, from the 1024 px master
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for SIZE in 16 32 128 256 512; do
+    sips -z $SIZE $SIZE "$PROJECT_ROOT/assets/AppIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" > /dev/null
+    sips -z $((SIZE * 2)) $((SIZE * 2)) "$PROJECT_ROOT/assets/AppIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" > /dev/null
+done
+iconutil -c icns "$ICONSET" -o "$RESOURCES_DIR/AppIcon.icns"
+rm -rf "$(dirname "$ICONSET")"
+
 cat << PLIST > "$CONTENTS_DIR/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -40,6 +50,8 @@ cat << PLIST > "$CONTENTS_DIR/Info.plist"
 <dict>
     <key>CFBundleExecutable</key>
     <string>Accio</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.accio.app</string>
     <key>CFBundleName</key>
