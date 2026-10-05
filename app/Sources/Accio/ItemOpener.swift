@@ -3,10 +3,11 @@ import AppKit
 /// Opens an item's menu, whether it's drawn or hidden (docs/spikes.md §4, §4b).
 ///
 /// Most apps' items take an `AXPress` even while hidden: the menu opens at
-/// once, hanging from where the item was last drawn. Some apps (Passwords)
-/// accept the press but show nothing while their item is hidden, and Apple's
-/// items have no AX actions: those are shown for a moment and clicked, and
-/// hidden again once their menu closes.
+/// once, hanging from where the item was last drawn on the main display.
+/// Some apps (Passwords) accept the press but show nothing while their item
+/// is hidden, and Apple's items have no AX actions: those are shown for a
+/// moment and clicked, and hidden again once their menu closes. So are all
+/// items when the user is on another display, so the menu opens there.
 @MainActor
 final class ItemOpener {
     static let shared = ItemOpener()
@@ -16,19 +17,26 @@ final class ItemOpener {
     private let controller = VisibilityController.shared
     /// The item being shown for a click, if any.
     private var opening: MenuBarItem?
+    /// Called with where an item is about to be clicked, and with `nil` once
+    /// its menu has closed, so Accio's stand-in icon can step aside.
+    var onClickSlot: (@MainActor (CGRect?) -> Void)?
 
     private init() {}
 
     func open(_ item: MenuBarItem, button: Button = .left) {
         guard opening == nil else { return }
         opening = item
+        // Where the user is working. A press opens the menu on the main
+        // display (apps' items report their place there).
+        let screen = Displays.active
+        let onMainDisplay = (screen.map(Displays.id(of:)) ?? CGMainDisplayID()) == CGMainDisplayID()
         Task {
             defer { opening = nil }
-            if let bundleID = item.bundleID, await Self.press(item, of: bundleID, button: button),
+            if onMainDisplay, let bundleID = item.bundleID, await Self.press(item, of: bundleID, button: button),
                await menuAppears() {
                 return
             }
-            await clickShowingItem(item, button)
+            await clickShowingItem(item, button, on: screen)
         }
     }
 
@@ -91,17 +99,17 @@ final class ItemOpener {
         return MenuBarState.isMenuOpen
     }
 
-    /// Click the item where it's drawn, showing it first if it's hidden or
-    /// doesn't fit.
-    private func clickShowingItem(_ item: MenuBarItem, _ button: Button) async {
-        var slot = Self.drawnFrame(of: item, in: MenuBarItems.visible())
+    /// Click the item where it's drawn on `screen`, showing it first if it's
+    /// hidden or doesn't fit.
+    private func clickShowingItem(_ item: MenuBarItem, _ button: Button, on screen: NSScreen?) async {
+        var slot = Self.drawnFrame(of: item, on: screen)
         if slot == nil {
             controller.showTemporarily(item, alone: false)
-            slot = await waitUntilDrawn(item)
+            slot = await waitUntilDrawn(item, on: screen)
             if slot == nil {
                 // No room next to the others (notch): show it on its own.
                 controller.showTemporarily(item, alone: true)
-                slot = await waitUntilDrawn(item)
+                slot = await waitUntilDrawn(item, on: screen)
             }
         }
         guard let slot else {
@@ -109,6 +117,9 @@ final class ItemOpener {
             controller.endTemporary()
             return
         }
+        onClickSlot?(slot)
+        // Let a stand-in icon over the item fade out of the way.
+        try? await Task.sleep(for: .milliseconds(100))
         await Self.click(at: CGPoint(x: slot.midX, y: slot.midY), button: button)
         // Keep it shown while its menu is open.
         try? await Task.sleep(for: .milliseconds(600))
@@ -116,22 +127,24 @@ final class ItemOpener {
             try? await Task.sleep(for: .milliseconds(300))
         }
         controller.endTemporary()
+        onClickSlot?(nil)
     }
 
     /// The item's frame once it has faded in and stopped moving; gives up after ~2 s.
-    private func waitUntilDrawn(_ item: MenuBarItem) async -> CGRect? {
+    private func waitUntilDrawn(_ item: MenuBarItem, on screen: NSScreen?) async -> CGRect? {
         var previous: CGRect?
         for _ in 0..<40 {
             try? await Task.sleep(for: .milliseconds(50))
-            let frame = Self.drawnFrame(of: item, in: MenuBarItems.visible())
+            let frame = Self.drawnFrame(of: item, on: screen)
             if let frame, frame == previous { return frame }
             previous = frame
         }
         return nil
     }
 
-    private static func drawnFrame(of item: MenuBarItem, in visible: [VisibleItem]) -> CGRect? {
-        guard !MenuBarItems.undrawnIDs(in: visible).contains(item.id) else { return nil }
+    private static func drawnFrame(of item: MenuBarItem, on screen: NSScreen?) -> CGRect? {
+        let visible = MenuBarItems.visible(on: screen.map(Displays.id(of:)) ?? CGMainDisplayID())
+        guard !MenuBarItems.undrawnIDs(in: visible, on: screen).contains(item.id) else { return nil }
         return visible.first { $0.item.id == item.id }?.frame
     }
 

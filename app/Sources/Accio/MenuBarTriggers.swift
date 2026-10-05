@@ -72,25 +72,29 @@ final class MenuBarTriggers {
     }
 
     /// Between the frontmost app's menus and the leftmost menu bar item, and
-    /// not under the notch.
+    /// not under the notch, on the menu bar of the display the pointer is on.
     private static func isOverEmptySpace() -> Bool {
-        guard let screen = NSScreen.screens.first else { return false }
         let point = NSEvent.mouseLocation
-        // Global top-left coordinates, like AX.
-        let x = point.x - screen.frame.minX
-        guard NSMouseInRect(point, screen.frame, false) else { return false }
-        if let notch = MenuBarItems.notchRect(), x >= notch.minX, x <= notch.maxX { return false }
-        let itemsStart = MenuBarItems.visible(includingOwn: true).map(\.frame.minX).min() ?? screen.frame.width
-        return x > appMenusEnd() + 4 && x < itemsStart - 4
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else { return false }
+        // x is the same in AppKit's and AX's global coordinates.
+        let x = point.x
+        if let notch = MenuBarItems.notchRect(on: screen), x >= notch.minX, x <= notch.maxX { return false }
+        let display = Displays.id(of: screen)
+        let itemsStart = MenuBarItems.visible(on: display, includingOwn: true).map(\.frame.minX).min() ?? screen.frame.maxX
+        return x > appMenusEnd(on: display) + 4 && x < itemsStart - 4
     }
 
-    /// Right edge of the frontmost app's menus (Apple menu, File, Edit…).
-    private static func appMenusEnd() -> CGFloat {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return 0 }
+    /// Right edge of the frontmost app's menus (Apple menu, File, Edit…) on
+    /// a display's menu bar; its left edge if they aren't drawn there.
+    private static func appMenusEnd(on display: CGDirectDisplayID) -> CGFloat {
+        let bounds = CGDisplayBounds(display)
+        guard let app = NSWorkspace.shared.frontmostApplication else { return bounds.minX }
         let element = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(element, 0.1)
-        guard let menuBar = AX.element(element, kAXMenuBarAttribute) else { return 0 }
-        return AX.children(menuBar).compactMap { AX.frame($0)?.maxX }.max() ?? 0
+        guard let menuBar = AX.element(element, kAXMenuBarAttribute) else { return bounds.minX }
+        return AX.children(menuBar).compactMap(AX.frame)
+            .filter { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) }
+            .map(\.maxX).max() ?? bounds.minX
     }
 
     // MARK: Scroll

@@ -292,6 +292,32 @@ Full screen (found after Phase 3):
   when the pointer reaches the top edge, until the pointer leaves the bar (checked with a full-screen
   test window: hidden → no icon, revealed → icon in place, hidden again → no icon).
 
+Multiple displays (found while finishing Phase 3, tested with a `CGVirtualDisplay` 1920×1080 placed to
+the right of the built-in display, "Displays have separate Spaces" off):
+
+- macOS 27 draws a menu bar with every status item on **each** display, even with shared Spaces.
+  MenuBarAgent adds one AX window per extra display (just one, not three) with its own slots, in global
+  coordinates: here at x 1470…3390, y 0, 30 pt high (the built-in bar is 33 pt).
+- Displays placed side by side all have their bar at y = 0, so a `minY < 4` filter mixes both bars:
+  every item is listed twice and an app's second slot looks like a second item (`Maccy#1`). Slots must
+  be matched to a display by its `CGDisplayBounds`.
+- The assertion applies to every bar: hidden items (and Accio's own item, unsigned) are gone from both.
+  So an unsigned build needs a stand-in icon on every display.
+- The second display's `NSScreen.visibleFrame` includes its bar, and `NSStatusBar.system.thickness` is
+  22 pt, so neither gives its height; MenuBarAgent's window for that bar does.
+- Apps' `AXExtrasMenuBar` children keep one element per item, framed on the main display. `AXPress`
+  opens the menu there even when the user is on the other display, while clicking the item where it's
+  drawn on that display opens the menu under it (Maccy, Passwords).
+- With Accio's own item hidden, an item shown left of Accio's place for a click is drawn exactly under
+  the stand-in icon (nothing reserves Accio's slot), so the click has to pass through it.
+- `CGSManagedDisplayGetCurrentSpace` takes `"Main"` with shared Spaces, or the display's UUID
+  (`CGDisplayCreateUUIDFromDisplayID`) when each display has its own.
+
+Item titles:
+
+- Apps name their items in AX, though not all do: `AXTitle` "Apple Passwords Key" (Passwords),
+  `AXDescription` "Accio", nothing for Maccy. MenuBarAgent's slots don't have them.
+
 ## Implications for the plan
 
 - **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs 0–8,

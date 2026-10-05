@@ -244,14 +244,14 @@ private struct Tile: View {
         }
         .help(help)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(item.name), \(section.title)")
+        .accessibilityLabel("\(item.title.map { "\(item.name), \($0)" } ?? item.name), \(section.title)")
         .accessibilityHint("Use the context menu to move it to another row.")
     }
 
     private var help: String {
         if isLocked { return "\(item.name) is hidden whenever Accio hides anything; macOS doesn't let it stay visible." }
         if !isRunning { return "\(item.name) isn't running." }
-        return item.name
+        return item.title.map { "\(item.name): \($0)" } ?? item.name
     }
 }
 
