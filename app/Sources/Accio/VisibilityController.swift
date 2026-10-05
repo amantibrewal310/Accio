@@ -35,6 +35,8 @@ final class VisibilityController: ObservableObject {
     private var clickMonitor: Any?
     private var observers: [NSObjectProtocol] = []
     private var scanTask: Task<Void, Never>?
+    private var pendingRescan: Task<Void, Never>?
+    private var pendingApply: Task<Void, Never>?
 
     private init() {}
 
@@ -298,8 +300,20 @@ final class VisibilityController: ObservableObject {
             }
             return
         }
-        apply()
+        applySoon()
         rescanSoon()
+    }
+
+    /// A launched app's items show or hide by the allow-list, which lists
+    /// running apps: update it once a burst of launches settles, rather than
+    /// swapping the assertion for each app.
+    private func applySoon() {
+        pendingApply?.cancel()
+        pendingApply = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            self.apply()
+        }
     }
 
     private func reassert() {
@@ -316,10 +330,13 @@ final class VisibilityController: ObservableObject {
         }
     }
 
-    /// Apps add their items a moment after launching.
+    /// Apps add their items a moment after launching. At login dozens of
+    /// apps launch within seconds: one scan, two seconds after the last.
     private func rescanSoon() {
-        Task { @MainActor in
+        pendingRescan?.cancel()
+        pendingRescan = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
             self.rescan()
         }
     }

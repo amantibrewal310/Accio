@@ -118,10 +118,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .bar:
             // An open menu closes by itself on the next click or key.
             itemsMenu.show(.hidden(all: all))
+        case .menuBar where isMenuBarAway && !controller.isRevealed:
+            // Items revealed in a menu bar that has slid away can't be seen.
+            itemsMenu.show(.hidden(all: all))
         case .menuBar:
             if !all { return controller.toggle() }
             controller.revealLevel == .all ? controller.hide() : controller.reveal(all: true)
         }
+    }
+
+    /// Whether the menu bar of the display the user is in has slid away
+    /// (full screen, or set to hide) and the pointer isn't bringing it back.
+    private var isMenuBarAway: Bool {
+        guard let screen = Displays.active else { return false }
+        return MenuBarPresence.autoHides(screen) && !MenuBarState.isMouseInMenuBar
     }
 
     private func showItems() {

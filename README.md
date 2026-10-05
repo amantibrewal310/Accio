@@ -5,10 +5,11 @@
 A lightweight, polished, open-source menu bar manager for macOS. It hides the icons you rarely use,
 brings any of them back on demand, and keeps them out from behind the notch.
 
-> **Status:** Phase 4 done. Hides the menu bar items you choose (Hidden / Always Hidden), brings them
+> **Status: public beta.** Hides the menu bar items you choose (Hidden / Always Hidden), brings them
 > back on demand (in the menu bar or in a menu), opens hidden items without showing them, finds any item
 > by name, and rearranges the real menu bar from a drag-and-drop layout editor. Works on every display's
-> menu bar.
+> menu bar. Feedback and bug reports are welcome in
+> [Issues](https://github.com/amantibrewal310/Accio/issues).
 
 ## Install
 
@@ -24,6 +25,17 @@ could not verify Accio is free of malware"). The cask removes the download quara
 so it opens normally. If you download the zip from a release instead, open it once, then click
 **Open Anyway** in System Settings → Privacy & Security (or run
 `xattr -dr com.apple.quarantine /Applications/Accio.app`).
+
+## Known limitations
+
+- **Hiding works per app.** An app's items share a row: hiding one of them hides them all.
+- **Some of Apple's items can't stay visible.** Focus, for one, is hidden whenever Accio hides anything;
+  the layout editor marks these with a lock.
+- **No item spacing setting.** On macOS 27 the menu bar lays out items itself and ignores the
+  `NSStatusItemSpacing` setting other menu bar managers use.
+- **Hidden items show as app icons**, not their live menu bar images: macOS 27 doesn't draw hidden
+  items, so there is nothing to capture.
+- **Not notarized** (see Install), and updates come through Homebrew only: `brew upgrade --cask accio`.
 
 ## Release
 

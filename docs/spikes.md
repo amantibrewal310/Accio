@@ -318,6 +318,16 @@ Item titles:
 - Apps name their items in AX, though not all do: `AXTitle` "Apple Passwords Key" (Passwords),
   `AXDescription` "Accio", nothing for Maccy. MenuBarAgent's slots don't have them.
 
+Full screen and item spacing (found in Phase 5):
+
+- In a full-screen app the menu bar is slid away and a click where an item is drawn lands in the app.
+  A synthesised `mouseMoved` event at the display's top edge brings the bar down (in place within
+  ~300 ms); `CGWarpMouseCursorPosition` doesn't. The bar stays down while the item's menu is open.
+- `NSStatusItemSpacing` / `NSStatusItemSelectionPadding` (`defaults -currentHost … -globalDomain`) do
+  nothing on 27: items stayed 16 pt apart after restarting MenuBarAgent and ControlCenter. Layout is
+  MenuBarAgent's own (`MenuBarLayoutEngine`, `leadingItemSpacing`/`trailingItemSpacing`), and its
+  binary doesn't mention either key. Not tried: logging out.
+
 ## Implications for the plan
 
 - **Hiding = `MBAssessmentModeAssertion`.** Shown section = allow-list (bundle IDs + system item IDs 0–8,
