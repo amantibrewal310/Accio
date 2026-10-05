@@ -15,8 +15,11 @@ final class ItemOpener {
     enum Button: Sendable { case left, right }
 
     private let controller = VisibilityController.shared
-    /// The item being shown for a click, if any.
-    private var opening: MenuBarItem?
+    /// Whether a request is on its way to opening a menu. Once the menu is
+    /// open, a request only waits for it to close, and a new one takes over.
+    private var isStarting = false
+    /// Bumped by every request, so an older one knows it has been replaced.
+    private var request = 0
     /// Called with where an item is about to be clicked, and with `nil` once
     /// its menu has closed, so Accio's stand-in icon can step aside.
     var onClickSlot: (@MainActor (CGRect?) -> Void)?
@@ -24,19 +27,25 @@ final class ItemOpener {
     private init() {}
 
     func open(_ item: MenuBarItem, button: Button = .left) {
-        guard opening == nil else { return }
-        opening = item
+        guard !isStarting else { return }
+        isStarting = true
+        request += 1
+        let request = request
+        // A previous request may still be keeping its item shown for a menu
+        // the user has moved on from.
+        controller.endTemporary()
+        onClickSlot?(nil)
         // Where the user is working. A press opens the menu on the main
         // display (apps' items report their place there).
         let screen = Displays.active
         let onMainDisplay = (screen.map(Displays.id(of:)) ?? CGMainDisplayID()) == CGMainDisplayID()
         Task {
-            defer { opening = nil }
+            defer { if self.request == request { isStarting = false } }
             if onMainDisplay, let bundleID = item.bundleID, await Self.press(item, of: bundleID, button: button),
                await menuAppears() {
                 return
             }
-            await clickShowingItem(item, button, on: screen)
+            await clickShowingItem(item, button, on: screen, request: request)
         }
     }
 
@@ -101,7 +110,7 @@ final class ItemOpener {
 
     /// Click the item where it's drawn on `screen`, showing it first if it's
     /// hidden or doesn't fit.
-    private func clickShowingItem(_ item: MenuBarItem, _ button: Button, on screen: NSScreen?) async {
+    private func clickShowingItem(_ item: MenuBarItem, _ button: Button, on screen: NSScreen?, request: Int) async {
         var slot = Self.drawnFrame(of: item, on: screen)
         if slot == nil {
             controller.showTemporarily(item, alone: false)
@@ -120,12 +129,16 @@ final class ItemOpener {
         onClickSlot?(slot)
         // Let a stand-in icon over the item fade out of the way.
         try? await Task.sleep(for: .milliseconds(100))
+        await Self.bringDownMenuBar(on: screen, above: slot)
         await Self.click(at: CGPoint(x: slot.midX, y: slot.midY), button: button)
-        // Keep it shown while its menu is open.
+        // Keep it shown while its menu is open, unless the user opens
+        // another item meanwhile: that request shows its own.
         try? await Task.sleep(for: .milliseconds(600))
-        while MenuBarState.isMenuOpen {
+        isStarting = false
+        while MenuBarState.isMenuOpen, self.request == request {
             try? await Task.sleep(for: .milliseconds(300))
         }
+        guard self.request == request else { return }
         controller.endTemporary()
         onClickSlot?(nil)
     }
@@ -146,6 +159,19 @@ final class ItemOpener {
         let visible = MenuBarItems.visible(on: screen.map(Displays.id(of:)) ?? CGMainDisplayID())
         guard !MenuBarItems.undrawnIDs(in: visible, on: screen).contains(item.id) else { return nil }
         return visible.first { $0.item.id == item.id }?.frame
+    }
+
+    /// In full screen (or with the menu bar set to hide), the bar is away
+    /// until the pointer touches the top edge, and a click where the item
+    /// would be lands in the app below. Moving the pointer there brings the
+    /// bar down; warping it doesn't. The bar is in place after ~300 ms.
+    private static func bringDownMenuBar(on screen: NSScreen?, above slot: CGRect) async {
+        guard let screen, MenuBarPresence.autoHides(screen), !MenuBarState.isMouseInMenuBar else { return }
+        let top = CGPoint(x: slot.midX, y: CGDisplayBounds(Displays.id(of: screen)).minY)
+        CGEvent(mouseEventSource: CGEventSource(stateID: .hidSystemState), mouseType: .mouseMoved,
+                mouseCursorPosition: top, mouseButton: .left)?
+            .post(tap: .cghidEventTap)
+        try? await Task.sleep(for: .milliseconds(500))
     }
 
     private static func click(at point: CGPoint, button: Button) async {

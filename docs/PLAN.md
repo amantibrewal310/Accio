@@ -21,7 +21,7 @@ Name: **Accio**, the Summoning Charm: summon any hidden menu bar item by name.
 | Metric | Budget |
 |---|---|
 | Idle CPU (no reveal, no "show for updates") | < 0.1% averaged over 60 s |
-| Idle memory (RSS) | < 35 MB |
+| Idle memory (footprint, as Activity Monitor shows) | < 35 MB |
 | App bundle size | < 10 MB |
 | Cold launch to functional | < 300 ms |
 | Reveal / hide latency (input → first frame) | < 16 ms (one frame at 60 Hz) |
@@ -182,7 +182,33 @@ Original plan:
 - Assign a hotkey to any individual item ("open Wi-Fi menu with ⌃⌥W").
 - Fully keyboard-navigable; VoiceOver labels.
 
-### Phase 5 — Polish pass 1 + public beta (2 weeks)
+### Phase 5 — Polish pass 1 + public beta (2 weeks) ✅ done (public beta: 0.5.1)
+
+As built:
+- **Full screen** (and a menu bar set to hide): items opened by a click (Apple's, Passwords) bring the
+  bar down first with a synthesised pointer move to the top edge (spikes "Full screen and item
+  spacing"). In "In the menu bar" mode, the reveal shortcut lists hidden items in the menu while the
+  bar is away, since items revealed there couldn't be seen.
+- **Login burst:** launches are coalesced into one allow-list update (150 ms) and one rescan (2 s
+  after the last).
+- **Search panel:** AppKit's `NSGlassEffectView`, clipped to its rounded shape, so neither the window
+  nor its shadow shows square corners; rows are concentric with the panel.
+- **Item spacing: not possible on macOS 27.** MenuBarAgent lays items out itself and ignores
+  `NSStatusItemSpacing` (spikes). Dropped unless a later macOS brings a way back.
+- **Menu bar transparency:** macOS 26+ has its own setting (Menu Bar → "Show menu bar background").
+- **Updates: Homebrew only** (decided): no Sparkle. **Crash reporting: none** (decided).
+- **Notarized DMG:** needs the paid Apple Developer account (§9, not for now); the Homebrew cask lifts
+  the quarantine instead.
+- **Performance audit** (dev build, 2026-10-05): idle CPU 0.05% (0.03 s of CPU in 60 s), memory
+  footprint 10 MB (RSS 55 MB, mostly shared system frameworks), bundle 1.2 MB / 752 KB zipped, launch
+  to first menu bar window 270–320 ms. Within budget, launch at the edge.
+
+- **Checked:** Stage Manager on (search, opening items, reveal), Dark Mode, an app relaunching its status
+  item (Maccy stays hidden). **Not checked yet:** Increase Contrast (its setting can't be changed from a
+  script), a Screen Sharing session, a second display.
+- **Public beta:** the README says so and lists the known limitations.
+
+Original plan:
 - Animations (respect Reduce Motion), light/dark, Increase Contrast, menu bar transparency setting.
 - Edge cases: full-screen apps, auto-hiding menu bar, Stage Manager, Spaces, screen sharing, apps that recreate their status item, login burst.
 - **Item spacing** control (Default / Small / Tiny) via `NSStatusItemSpacing` + guided relaunch of affected apps.

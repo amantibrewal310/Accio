@@ -97,7 +97,7 @@ final class MenuBarPresence {
     /// The setting in System Settings → Control Centre → "Automatically hide
     /// and show the menu bar" is two flags: hide on the desktop, and stay
     /// visible in full screen.
-    private static func autoHides(_ screen: NSScreen) -> Bool {
+    static func autoHides(_ screen: NSScreen) -> Bool {
         let defaults = UserDefaults.standard
         if isFullScreenSpace(on: screen) {
             return !defaults.bool(forKey: "AppleMenuBarVisibleInFullscreen")

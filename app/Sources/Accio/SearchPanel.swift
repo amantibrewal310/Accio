@@ -14,11 +14,15 @@ final class SearchPanel: NSObject, NSWindowDelegate {
 
     private var panel: NSPanel?
     private var keyMonitor: Any?
+    private var resultsObserver: AnyCancellable?
+    /// The content's height at the panel's width.
+    private var contentHeight: (() -> CGFloat)?
     private let model = SearchModel()
     /// Where the panel's top edge goes, as it grows and shrinks with the results.
     private var top: CGFloat = 0
 
     static let width: CGFloat = 600
+    static let cornerRadius: CGFloat = 22
 
     var isOpen: Bool { panel?.isVisible ?? false }
 
@@ -66,23 +70,41 @@ final class SearchPanel: NSObject, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.delegate = self
         panel.setAccessibilityLabel("Search menu bar items")
-        let view = SearchView(
-            model: model,
-            onHeight: { [weak self] height in self?.resize(to: height) },
-            onOpen: { [weak self] item, button in self?.open(item, button: button) }
-        )
-        let hosting = NSHostingView(rootView: view)
+        let view = SearchView(model: model) { [weak self] item, button in self?.open(item, button: button) }
+        let hosting = NSHostingController(rootView: view)
         hosting.sizingOptions = []
-        panel.contentView = hosting
+        // AppKit's glass shapes the window itself; SwiftUI's leaves a faint
+        // square behind the rounded corners.
+        let glass = NSGlassEffectView()
+        glass.cornerRadius = Self.cornerRadius
+        glass.contentView = hosting.view
+        glass.autoresizingMask = [.width, .height]
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = Self.cornerRadius
+        container.layer?.cornerCurve = .continuous
+        container.layer?.masksToBounds = true
+        container.addSubview(glass)
+        panel.contentView = container
+        glass.frame = container.bounds
+        // Holds the controller: the glass view only holds its view.
+        contentHeight = {
+            hosting.sizeThatFits(in: NSSize(width: Self.width, height: 10_000)).height.rounded()
+        }
+        // Fit the results once SwiftUI has them.
+        resultsObserver = model.$results.combineLatest(model.$query)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.fitContent() }
         return panel
     }
 
     /// Grow or shrink with the results, keeping the top edge in place.
-    private func resize(to height: CGFloat) {
-        guard let panel, height > 0, panel.frame.height != height else { return }
+    private func fitContent() {
+        guard let panel, let height = contentHeight?(), height > 0, panel.frame.height != height else { return }
         let origin = panel.isVisible ? NSPoint(x: panel.frame.minX, y: top - height) : panel.frame.origin
         panel.setFrame(NSRect(origin: origin, size: NSSize(width: Self.width, height: height)), display: true)
-        panel.invalidateShadow()
+        // The shadow follows the glass's rounded shape once it has redrawn.
+        DispatchQueue.main.async { panel.invalidateShadow() }
     }
 
     private func open(_ item: MenuBarItem, button: ItemOpener.Button) {
@@ -260,7 +282,6 @@ enum SearchHistory {
 
 private struct SearchView: View {
     @ObservedObject var model: SearchModel
-    let onHeight: (CGFloat) -> Void
     let onOpen: (MenuBarItem, ItemOpener.Button) -> Void
     @FocusState private var isFieldFocused: Bool
 
@@ -282,9 +303,7 @@ private struct SearchView: View {
             }
         }
         .frame(width: SearchPanel.width)
-        .glassEffect(.regular, in: .rect(cornerRadius: 22))
         .fixedSize(horizontal: false, vertical: true)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHeight($0) }
         .onAppear { isFieldFocused = true }
         .onChange(of: model.focusRequest) { isFieldFocused = true }
     }
@@ -358,7 +377,8 @@ private struct Row: View {
         .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .padding(.horizontal, 10)
         .frame(maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? Color.accentColor : .clear))
+        // Concentric with the panel's corners, 6 pt in.
+        .background(RoundedRectangle(cornerRadius: SearchPanel.cornerRadius - 6).fill(isSelected ? Color.accentColor : .clear))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(result.accessibilityLabel)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
