@@ -52,6 +52,44 @@ final class HotKey {
     }
 }
 
+/// Registers the user's shortcuts (Preferences) and runs them.
+@MainActor
+final class ShortcutCenter: ObservableObject {
+    static let shared = ShortcutCenter()
+
+    /// Actions whose shortcut macOS wouldn't register: another app has it.
+    @Published private(set) var unavailable: Set<Preferences.ShortcutAction> = []
+    var perform: (@MainActor (Preferences.ShortcutAction) -> Void)?
+
+    private var hotKeys: [HotKey] = []
+    private var isSuspended = false
+
+    private init() {}
+
+    func register() {
+        hotKeys.forEach { $0.unregister() }
+        hotKeys = []
+        guard !isSuspended else { return }
+        var unavailable: Set<Preferences.ShortcutAction> = []
+        for (action, shortcut) in Preferences.shared.shortcuts {
+            if let hotKey = HotKey(shortcut, handler: { [weak self] in self?.perform?(action) }) {
+                hotKeys.append(hotKey)
+            } else {
+                unavailable.insert(action)
+                log("[HotKey] \(shortcut.displayString) is taken by another app")
+            }
+        }
+        if unavailable != self.unavailable { self.unavailable = unavailable }
+    }
+
+    /// While a shortcut recorder listens, the current shortcuts mustn't swallow keys.
+    func suspend(_ suspended: Bool) {
+        guard suspended != isSuspended else { return }
+        isSuspended = suspended
+        register()
+    }
+}
+
 /// A key plus modifiers, stored in UserDefaults as "keyCode:modifierFlags".
 struct Shortcut: Equatable, Sendable {
     var keyCode: UInt32
@@ -59,6 +97,8 @@ struct Shortcut: Equatable, Sendable {
 
     /// ⌃⌥⌘A, for Accio.
     static let defaultReveal = Shortcut(keyCode: UInt32(kVK_ANSI_A), modifiers: [.control, .option, .command])
+    /// ⌥Space, where launchers usually go (⌘Space is Spotlight's).
+    static let defaultSearch = Shortcut(keyCode: UInt32(kVK_Space), modifiers: [.option])
 
     init(keyCode: UInt32, modifiers: NSEvent.ModifierFlags) {
         self.keyCode = keyCode
@@ -100,6 +140,7 @@ struct Shortcut: Equatable, Sendable {
 
     /// The key as an NSMenuItem key equivalent, when it's a single character.
     var menuKeyEquivalent: String? {
+        if keyCode == kVK_Space { return " " }
         let name = Self.keyName(keyCode)
         return name.count == 1 && name.allSatisfy(\.isASCII) ? name.lowercased() : nil
     }

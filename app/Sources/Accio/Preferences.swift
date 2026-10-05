@@ -69,8 +69,18 @@ final class Preferences: ObservableObject {
         didSet { save(alwaysHiddenSystemItems.map(\.rawValue), Key.alwaysHiddenSystemItems); onChange?(.visibility) }
     }
 
-    @Published var revealShortcut: Shortcut? {
+    @Published private(set) var revealShortcut: Shortcut? {
         didSet { save(revealShortcut?.rawValue ?? "", Key.revealShortcut); onChange?(.shortcut) }
+    }
+
+    /// Opens the search panel.
+    @Published private(set) var searchShortcut: Shortcut? {
+        didSet { save(searchShortcut?.rawValue ?? "", Key.searchShortcut); onChange?(.shortcut) }
+    }
+
+    /// Shortcuts that open one item's menu, by item ID.
+    @Published private(set) var itemShortcuts: [String: Shortcut] {
+        didSet { save(itemShortcuts.mapValues(\.rawValue), Key.itemShortcuts); onChange?(.shortcut) }
     }
 
     /// Seconds before revealed items hide again; 0 means never.
@@ -104,6 +114,8 @@ final class Preferences: ObservableObject {
         static let shownSystemItems = "ShownSystemItems"
         static let alwaysHiddenSystemItems = "AlwaysHiddenSystemItems"
         static let revealShortcut = "RevealShortcut"
+        static let searchShortcut = "SearchShortcut"
+        static let itemShortcuts = "ItemShortcuts"
         static let rehideDelay = "RehideDelay"
         static let rehidesOnOutsideClick = "RehidesOnOutsideClick"
         static let revealMode = "RevealMode"
@@ -118,6 +130,9 @@ final class Preferences: ObservableObject {
         alwaysHiddenSystemItems = Self.systemItems(defaults.array(forKey: Key.alwaysHiddenSystemItems)) ?? []
         // An empty string means the user cleared the shortcut.
         revealShortcut = defaults.string(forKey: Key.revealShortcut).map(Shortcut.init(rawValue:)) ?? .defaultReveal
+        searchShortcut = defaults.string(forKey: Key.searchShortcut).map(Shortcut.init(rawValue:)) ?? .defaultSearch
+        itemShortcuts = (defaults.dictionary(forKey: Key.itemShortcuts) as? [String: String] ?? [:])
+            .compactMapValues(Shortcut.init(rawValue:))
         rehideDelay = defaults.object(forKey: Key.rehideDelay) as? Int ?? 10
         rehidesOnOutsideClick = defaults.object(forKey: Key.rehidesOnOutsideClick) as? Bool ?? true
         revealMode = defaults.string(forKey: Key.revealMode).flatMap(RevealMode.init(rawValue:)) ?? .menuBar
@@ -132,6 +147,56 @@ final class Preferences: ObservableObject {
 
     private func save(_ value: Any, _ key: String) {
         defaults.set(value, forKey: key)
+    }
+
+    // MARK: Shortcuts
+
+    /// What a keyboard shortcut does.
+    enum ShortcutAction: Hashable {
+        /// Show or hide hidden items.
+        case reveal
+        /// Open the search panel.
+        case search
+        /// Open the item with this ID.
+        case item(String)
+    }
+
+    func shortcut(for action: ShortcutAction) -> Shortcut? {
+        switch action {
+        case .reveal: revealShortcut
+        case .search: searchShortcut
+        case .item(let id): itemShortcuts[id]
+        }
+    }
+
+    /// Every shortcut the user has, with what it does.
+    var shortcuts: [(ShortcutAction, Shortcut)] {
+        var all: [(ShortcutAction, Shortcut)] = []
+        if let revealShortcut { all.append((.reveal, revealShortcut)) }
+        if let searchShortcut { all.append((.search, searchShortcut)) }
+        all += itemShortcuts.map { (.item($0.key), $0.value) }
+        return all
+    }
+
+    /// What `shortcut` does now, if anything.
+    func action(for shortcut: Shortcut) -> ShortcutAction? {
+        shortcuts.first { $0.1 == shortcut }?.0
+    }
+
+    /// Give `action` a shortcut, taking it from whatever had it before: one
+    /// shortcut does one thing.
+    func setShortcut(_ shortcut: Shortcut?, for action: ShortcutAction) {
+        if let shortcut {
+            if action != .reveal, revealShortcut == shortcut { revealShortcut = nil }
+            if action != .search, searchShortcut == shortcut { searchShortcut = nil }
+            let others = itemShortcuts.filter { $0.value == shortcut && action != .item($0.key) }
+            if !others.isEmpty { itemShortcuts = itemShortcuts.filter { !others.keys.contains($0.key) } }
+        }
+        switch action {
+        case .reveal: revealShortcut = shortcut
+        case .search: searchShortcut = shortcut
+        case .item(let id): itemShortcuts[id] = shortcut
+        }
     }
 
     // MARK: Sections

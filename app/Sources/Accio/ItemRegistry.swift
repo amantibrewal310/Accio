@@ -33,6 +33,15 @@ final class ItemRegistry: ObservableObject {
         items.first { $0.id == id }
     }
 
+    /// The item's name, with its title or number for apps with several
+    /// items (see `MenuBarItem.label`), numbered left to right.
+    func label(of item: MenuBarItem) -> String {
+        guard let bundleID = item.bundleID else { return item.name }
+        let siblings = items.filter { $0.bundleID == bundleID }
+        guard siblings.count > 1, let index = siblings.firstIndex(where: { $0.id == item.id }) else { return item.name }
+        return item.label(number: index + 1)
+    }
+
     /// Whether the item is in the menu bar now, drawn or hidden.
     func isPresent(_ item: MenuBarItem) -> Bool {
         item.bundleID == nil ? !absentSystemIDs.contains(item.id) : isRunning(item)

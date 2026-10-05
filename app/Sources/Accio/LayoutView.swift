@@ -186,7 +186,7 @@ private struct Tile: View {
     @ObservedObject private var drop = LayoutDrop.shared
     @ObservedObject private var mover = ItemMover.shared
     @ObservedObject private var registry = ItemRegistry.shared
-    private let preferences = Preferences.shared
+    @ObservedObject private var preferences = Preferences.shared
 
     private static let size = CGSize(width: 76, height: 66)
 
@@ -251,12 +251,16 @@ private struct Tile: View {
     private var help: String {
         if isLocked { return "\(item.name) is hidden whenever Accio hides anything; macOS doesn't let it stay visible." }
         if !isRunning { return "\(item.name) isn't running." }
-        return item.title.map { "\(item.name): \($0)" } ?? item.name
+        let shortcut = preferences.shortcut(for: .item(item.id)).map { " (\($0.displayString))" } ?? ""
+        return (item.title.map { "\(item.name): \($0)" } ?? item.name) + shortcut
     }
 }
 
-private struct ItemIcon: View {
+/// An item's app icon, or for Apple's items its symbol on a tile. Sized
+/// for a `size`-point frame.
+struct ItemIcon: View {
     let item: MenuBarItem
+    var size: CGFloat = 32
 
     var body: some View {
         switch item.owner {
@@ -266,9 +270,9 @@ private struct ItemIcon: View {
                 .aspectRatio(contentMode: .fit)
         case .system:
             Image(systemName: item.symbolName ?? "menubar.rectangle")
-                .font(.system(size: 15, weight: .medium))
-                .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(.quaternary))
+                .font(.system(size: size * 0.47, weight: .medium))
+                .frame(width: size * 0.875, height: size * 0.875)
+                .background(RoundedRectangle(cornerRadius: size * 0.22).fill(.quaternary))
         }
     }
 }

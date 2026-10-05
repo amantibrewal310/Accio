@@ -3,7 +3,6 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private var hotKey: HotKey?
     /// Stand-ins for the status item when the build can't keep it visible.
     private var standIn: StandInIcons?
     private let controller = VisibilityController.shared
@@ -19,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         preferences.onChange = { [weak self] change in
             self?.controller.preferencesChanged(change)
-            if change == .shortcut { self?.registerHotKey() }
+            if change == .shortcut { ShortcutCenter.shared.register() }
             if change == .reveal { self?.revealSettingsChanged() }
         }
         controller.onRevealChange = { [weak self] _ in self?.updateIcon() }
@@ -52,7 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         controller.start()
-        registerHotKey()
+        ShortcutCenter.shared.perform = { [weak self] action in self?.perform(action) }
+        ShortcutCenter.shared.register()
         revealSettingsChanged()
 
         if !MenuBarItems.isTrusted || !UserDefaults.standard.bool(forKey: "HasLaunched") {
@@ -159,6 +159,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             all.isEnabled = controller.isAvailable
             menu.addItem(all)
         }
+        let search = ClosureMenuItem("Search Menu Bar…") { SearchPanel.shared.show() }
+        if let shortcut = preferences.searchShortcut, let key = shortcut.menuKeyEquivalent {
+            search.keyEquivalent = key
+            search.keyEquivalentModifierMask = shortcut.modifiers
+        }
+        menu.addItem(search)
         if !controller.isAvailable {
             let note = NSMenuItem(title: "Hiding isn't available on this version of macOS", action: nil, keyEquivalent: "")
             note.isEnabled = false
@@ -181,23 +187,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = nil
     }
 
-    // MARK: Hotkey
+    // MARK: Shortcuts
 
-    private func registerHotKey() {
-        hotKey?.unregister()
-        hotKey = nil
-        guard let shortcut = preferences.revealShortcut else { return }
-        hotKey = HotKey(shortcut) { [weak self] in self?.toggleItems(all: false) }
-        if hotKey == nil { log("[HotKey] \(shortcut.displayString) is taken by another app") }
-    }
-
-    /// While the shortcut recorder listens, the old hotkey mustn't swallow keys.
-    func suspendHotKey(_ suspended: Bool) {
-        if suspended {
-            hotKey?.unregister()
-            hotKey = nil
-        } else if hotKey == nil {
-            registerHotKey()
+    private func perform(_ action: Preferences.ShortcutAction) {
+        switch action {
+        case .reveal:
+            toggleItems(all: false)
+        case .search:
+            SearchPanel.shared.toggle()
+        case .item(let id):
+            let registry = ItemRegistry.shared
+            guard let item = registry.item(withID: id), registry.isPresent(item) else { return NSSound.beep() }
+            ItemOpener.shared.open(item)
         }
     }
 }
