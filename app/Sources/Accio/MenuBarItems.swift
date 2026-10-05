@@ -15,6 +15,24 @@ struct MenuBarItem: Identifiable, Hashable, Sendable {
     let id: String
     let owner: Owner
     var name: String
+    /// What the app calls this item (its accessibility title), when that
+    /// says more than the app's name. Tells apart apps' several items.
+    var title: String?
+
+    init(id: String, owner: Owner, name: String, title: String? = nil) {
+        self.id = id
+        self.owner = owner
+        self.name = name
+        self.title = title
+    }
+
+    /// The name, with the item's title for apps with several items
+    /// ("Stats – CPU"); `number` stands in when the app gives no title.
+    func label(number: Int?) -> String {
+        guard let number else { return name }
+        guard let title else { return "\(name) \(number)" }
+        return title.localizedCaseInsensitiveContains(name) ? title : "\(name) – \(title)"
+    }
 
     var bundleID: String? {
         if case .app(let bundleID) = owner { bundleID } else { nil }
@@ -67,7 +85,10 @@ struct VisibleItem: Sendable {
 struct MenuBarApp: Identifiable, Equatable, Sendable {
     let bundleID: String
     let name: String
-    let itemCount: Int
+    /// Each item's title, left to right (see `MenuBarItem.title`).
+    let itemTitles: [String?]
+
+    var itemCount: Int { itemTitles.count }
 
     var id: String { bundleID }
 }
@@ -83,11 +104,20 @@ enum MenuBarItems {
 
     private static let agentBundleID = "com.apple.MenuBarAgent"
 
-    /// Items drawn on the main display's menu bar, left to right, from
-    /// MenuBarAgent's AX tree: one slot per item, whose first child belongs to
-    /// the item's app. Items hidden by Accio aren't listed. Accio's own item
-    /// is left out unless `includingOwn`. Takes a few milliseconds.
-    static func visible(includingOwn: Bool = false) -> [VisibleItem] {
+    /// Whether a slot frame belongs to `display`'s menu bar. Each display
+    /// has its own bar, and displays side by side all have theirs at the top.
+    private static func isInBar(_ frame: CGRect, of display: CGDirectDisplayID) -> Bool {
+        let bounds = CGDisplayBounds(display)
+        return frame.width > 0 && frame.minY >= bounds.minY && frame.minY < bounds.minY + 4
+            && frame.midX >= bounds.minX && frame.midX < bounds.maxX
+    }
+
+    /// Items drawn on a display's menu bar (the main display's by default),
+    /// left to right, from MenuBarAgent's AX tree: one slot per item, whose
+    /// first child belongs to the item's app. Items hidden by Accio aren't
+    /// listed. Accio's own item is left out unless `includingOwn`. Takes a
+    /// few milliseconds.
+    static func visible(on display: CGDirectDisplayID = CGMainDisplayID(), includingOwn: Bool = false) -> [VisibleItem] {
         guard
             isTrusted,
             let agent = NSRunningApplication.runningApplications(withBundleIdentifier: agentBundleID).first
@@ -103,7 +133,7 @@ enum MenuBarItems {
         for window in AX.children(app, kAXWindowsAttribute) {
             for slot in AX.children(window) {
                 guard
-                    let frame = AX.frame(slot), frame.width > 0, frame.minY < 4,
+                    let frame = AX.frame(slot), isInBar(frame, of: display),
                     // The overflow chevron is the slot without a child.
                     let owner = AX.children(slot).first
                 else { continue }
@@ -147,20 +177,22 @@ enum MenuBarItems {
         }
     }
 
-    /// The notch on the main display, in global top-left coordinates.
+    /// The notch on a display (the main one by default), in global top-left
+    /// coordinates.
     @MainActor
-    static func notchRect() -> CGRect? {
-        guard let screen = NSScreen.screens.first,
-              let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea
+    static func notchRect(on screen: NSScreen? = NSScreen.screens.first) -> CGRect? {
+        guard let screen, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea
         else { return nil }
-        return CGRect(x: screen.frame.minX + left.maxX, y: 0, width: right.minX - left.maxX, height: left.height)
+        let top = CGDisplayBounds(Displays.id(of: screen)).minY
+        return CGRect(x: screen.frame.minX + left.maxX, y: top, width: right.minX - left.maxX, height: left.height)
     }
 
     /// Listed items that aren't really drawn: behind the notch, or stacked
-    /// on the overflow chevron with others because they don't fit.
+    /// on the overflow chevron with others because they don't fit. `visible`
+    /// must come from `screen`'s menu bar.
     @MainActor
-    static func undrawnIDs(in visible: [VisibleItem]) -> Set<String> {
-        let notch = notchRect()
+    static func undrawnIDs(in visible: [VisibleItem], on screen: NSScreen? = NSScreen.screens.first) -> Set<String> {
+        let notch = notchRect(on: screen)
         var ids = Set<String>()
         for item in visible {
             let behindNotch = notch.map { $0.intersects(item.frame) } ?? false
@@ -170,8 +202,8 @@ enum MenuBarItems {
         return ids
     }
 
-    /// Where Accio's own status item is drawn, while it's drawn.
-    static func ownItemFrame() -> CGRect? {
+    /// Where Accio's own status item is drawn on a display, while it's drawn.
+    static func ownItemFrame(on display: CGDirectDisplayID = CGMainDisplayID()) -> CGRect? {
         guard
             isTrusted,
             let agent = NSRunningApplication.runningApplications(withBundleIdentifier: agentBundleID).first
@@ -182,12 +214,24 @@ enum MenuBarItems {
         for window in AX.children(app, kAXWindowsAttribute) {
             for slot in AX.children(window) {
                 guard let owner = AX.children(slot).first, AX.pid(owner) == ownPID,
-                      let frame = AX.frame(slot), frame.width > 0, frame.minY < 4
+                      let frame = AX.frame(slot), isInBar(frame, of: display)
                 else { continue }
                 return frame
             }
         }
         return nil
+    }
+
+    /// Every display's menu bar, as MenuBarAgent lays it out (one window per
+    /// bar, some repeated).
+    static func barFrames() -> [CGRect] {
+        guard
+            isTrusted,
+            let agent = NSRunningApplication.runningApplications(withBundleIdentifier: agentBundleID).first
+        else { return [] }
+        let app = AXUIElementCreateApplication(agent.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        return AX.children(app, kAXWindowsAttribute).compactMap(AX.frame)
     }
 
     /// Running apps that own menu bar items, by asking each app for its
@@ -202,16 +246,19 @@ enum MenuBarItems {
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.bundleURL?.pathExtension == "app" && $0.bundleIdentifier != nil && !excluded.contains($0.bundleIdentifier)
         }
-        nonisolated(unsafe) let counts = UnsafeMutableBufferPointer<Int>.allocate(capacity: apps.count)
-        counts.initialize(repeating: 0)
-        defer { counts.deallocate() }
+        nonisolated(unsafe) let titles = UnsafeMutableBufferPointer<[String?]>.allocate(capacity: apps.count)
+        titles.initialize(repeating: [])
+        defer { titles.deallocate() }
         // One slow app then only costs its own timeout.
         DispatchQueue.concurrentPerform(iterations: apps.count) { i in
-            counts[i] = itemCount(of: apps[i].processIdentifier)
+            titles[i] = itemTitles(of: apps[i].processIdentifier)
         }
-        return zip(apps, counts).compactMap { app, count in
-            guard count > 0, let bundleID = app.bundleIdentifier else { return nil }
-            return MenuBarApp(bundleID: bundleID, name: displayName(of: app), itemCount: count)
+        return zip(apps, titles).compactMap { app, titles in
+            guard !titles.isEmpty, let bundleID = app.bundleIdentifier else { return nil }
+            let name = displayName(of: app)
+            // A title that only repeats the app's name says nothing.
+            let useful = titles.map { $0.flatMap { $0.caseInsensitiveCompare(name) == .orderedSame ? nil : $0 } }
+            return MenuBarApp(bundleID: bundleID, name: name, itemTitles: useful)
         }
     }
 
@@ -225,15 +272,22 @@ enum MenuBarItems {
         return app.localizedName ?? app.bundleIdentifier ?? "?"
     }
 
-    private static func itemCount(of pid: pid_t) -> Int {
+    /// The app's items, left to right (hidden ones keep the place they were
+    /// last drawn at), with whatever the app calls each: its accessibility
+    /// description, title or help tag.
+    private static func itemTitles(of pid: pid_t) -> [String?] {
         let app = AXUIElementCreateApplication(pid)
         // Some apps never answer; don't let one hang the scan.
         AXUIElementSetMessagingTimeout(app, 0.25)
-        guard let extras = AX.element(app, "AXExtrasMenuBar") else { return 0 }
-        var count: CFIndex = 0
-        guard AXUIElementGetAttributeValueCount(extras, kAXChildrenAttribute as CFString, &count) == .success
-        else { return 0 }
-        return count
+        guard let extras = AX.element(app, "AXExtrasMenuBar") else { return [] }
+        return AX.children(extras)
+            .map { (AX.frame($0)?.minX ?? 0, $0) }
+            .sorted { $0.0 < $1.0 }
+            .map { _, item in
+                [kAXDescriptionAttribute, kAXTitleAttribute, kAXHelpAttribute].lazy
+                    .compactMap { AX.string(item, $0)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty }
+            }
     }
 }
 

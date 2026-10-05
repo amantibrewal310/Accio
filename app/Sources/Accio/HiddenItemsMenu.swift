@@ -83,16 +83,17 @@ final class HiddenItemsMenu: NSObject, NSMenuDelegate {
         let perApp = Dictionary(grouping: items.compactMap(\.bundleID), by: { $0 }).mapValues(\.count)
         var seen: [String: Int] = [:]
         for item in items {
-            var title = item.name
+            var number: Int?
             if let bundleID = item.bundleID, perApp[bundleID, default: 0] > 1 {
-                // Apps with several items: number them left to right.
+                // Apps with several items: their titles, or numbers left to right.
                 seen[bundleID, default: 0] += 1
-                title += " \(seen[bundleID]!)"
+                number = seen[bundleID]
             }
+            let title = item.label(number: number)
             let image = Self.icon(for: item)
             let open = ClosureMenuItem(title) { ItemOpener.shared.open(item) }
             open.image = image
-            open.toolTip = item.name
+            open.toolTip = item.title.map { "\(item.name): \($0)" } ?? item.name
             menu.addItem(open)
             let secondary = ClosureMenuItem("\(title) (Secondary Click)") { ItemOpener.shared.open(item, button: .right) }
             secondary.image = image
@@ -120,9 +121,11 @@ final class HiddenItemsMenu: NSObject, NSMenuDelegate {
         switch content {
         case .overflow(let items): return items
         case .hidden(let all):
-            // Plus shown items that don't fit in the menu bar right now.
-            let visible = MenuBarItems.visible()
-            let undrawn = MenuBarItems.undrawnIDs(in: visible)
+            // Plus shown items that don't fit in the menu bar right now,
+            // on the display the user is working in.
+            let screen = Displays.active
+            let visible = MenuBarItems.visible(on: Displays.activeID)
+            let undrawn = MenuBarItems.undrawnIDs(in: visible, on: screen)
             return registry.items.filter { item in
                 guard !item.isAccio, registry.isPresent(item) else { return false }
                 switch preferences.section(of: item.owner) {

@@ -54,7 +54,13 @@ final class ItemRegistry: ObservableObject {
             let absent = Set(items.filter { $0.bundleID == nil }.map(\.id)).subtracting(visibleIDs)
             if absent != absentSystemIDs { absentSystemIDs = absent }
         }
-        var merged = live
+        // MenuBarAgent's tree doesn't have apps' titles for their items.
+        let titles = Dictionary(items.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
+        var merged = live.map { item in
+            var item = item
+            if item.title == nil { item.title = titles[item.id] ?? nil }
+            return item
+        }
         var lastPlaced = -1
         for item in items {
             if let index = merged.firstIndex(where: { $0.id == item.id }) {
@@ -80,12 +86,16 @@ final class ItemRegistry: ObservableObject {
             }
             for i in merged.indices where merged[i].bundleID == app.bundleID {
                 merged[i].name = app.name
+                let index = merged[i].appIndex
+                if index < app.itemCount { merged[i].title = app.itemTitles[index] }
             }
             let missing = (0..<app.itemCount)
-                .map { MenuBarItem.appItemID(app.bundleID, index: $0) }
-                .filter { id in !merged.contains { $0.id == id } }
+                .filter { index in !merged.contains { $0.id == MenuBarItem.appItemID(app.bundleID, index: index) } }
             merged.insert(contentsOf: missing.map {
-                MenuBarItem(id: $0, owner: .app(bundleID: app.bundleID), name: app.name)
+                MenuBarItem(
+                    id: MenuBarItem.appItemID(app.bundleID, index: $0), owner: .app(bundleID: app.bundleID),
+                    name: app.name, title: app.itemTitles[$0]
+                )
             }, at: 0)
         }
         commit(merged)
@@ -100,17 +110,26 @@ final class ItemRegistry: ObservableObject {
     // MARK: Storage
 
     private static func encode(_ item: MenuBarItem) -> [String: String] {
+        var entry = ["id": item.id, "name": item.name]
         switch item.owner {
-        case .app(let bundleID): ["id": item.id, "app": bundleID, "name": item.name]
-        case .system(let identifier): ["id": item.id, "system": identifier, "name": item.name]
+        case .app(let bundleID): entry["app"] = bundleID
+        case .system(let identifier): entry["system"] = identifier
         }
+        entry["title"] = item.title
+        return entry
     }
 
     private static func decode(_ entry: [String: String]) -> MenuBarItem? {
         guard let id = entry["id"], let name = entry["name"] else { return nil }
-        if let bundleID = entry["app"] { return MenuBarItem(id: id, owner: .app(bundleID: bundleID), name: name) }
-        if let identifier = entry["system"] { return MenuBarItem(id: id, owner: .system(identifier: identifier), name: name) }
-        return nil
+        let owner: MenuBarItem.Owner
+        if let bundleID = entry["app"] {
+            owner = .app(bundleID: bundleID)
+        } else if let identifier = entry["system"] {
+            owner = .system(identifier: identifier)
+        } else {
+            return nil
+        }
+        return MenuBarItem(id: id, owner: owner, name: name, title: entry["title"])
     }
 
     /// Phase 1 only remembered names of apps it had seen.

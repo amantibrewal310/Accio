@@ -50,6 +50,7 @@ final class VisibilityController: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(50))
             }
             registry.update(visible: MenuBarItems.visible(includingOwn: true), everythingShown: true)
+            Displays.refresh()
             apply()
             rescan()
         }
@@ -127,10 +128,11 @@ final class VisibilityController: ObservableObject {
         apply()
     }
 
-    /// Revealed items that aren't drawn, reported through `onOverflow`.
+    /// Revealed items that aren't drawn on the display the user is working
+    /// in, reported through `onOverflow`.
     private func checkOverflow() {
-        let visible = MenuBarItems.visible()
-        let drawn = Set(visible.map(\.item.id)).subtracting(MenuBarItems.undrawnIDs(in: visible))
+        let visible = MenuBarItems.visible(on: Displays.activeID)
+        let drawn = Set(visible.map(\.item.id)).subtracting(MenuBarItems.undrawnIDs(in: visible, on: Displays.active))
         let listed = Set(visible.map(\.item.id))
         let overflow = registry.items.filter { item in
             guard !item.isAccio, staysVisible(item), registry.isRunning(item), !drawn.contains(item.id) else { return false }
@@ -283,7 +285,7 @@ final class VisibilityController: ObservableObject {
             MainActor.assumeIsolated { VisibilityController.shared.reassert() }
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { VisibilityController.shared.reassert() }
+            MainActor.assumeIsolated { VisibilityController.shared.displaysChanged() }
         })
     }
 
@@ -304,6 +306,16 @@ final class VisibilityController: ObservableObject {
         hider?.reassert()
     }
 
+    private func displaysChanged() {
+        reassert()
+        // MenuBarAgent lays out a new display's bar a moment later.
+        Displays.refresh()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            Displays.refresh()
+        }
+    }
+
     /// Apps add their items a moment after launching.
     private func rescanSoon() {
         Task { @MainActor in
@@ -316,23 +328,20 @@ final class VisibilityController: ObservableObject {
 /// Read-only questions about what the user is doing in the menu bar.
 @MainActor
 enum MenuBarState {
-    /// The menu bar's height on the screen under the mouse.
-    private static func menuBarHeight(of screen: NSScreen) -> CGFloat {
-        max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
-    }
-
+    /// Whether the pointer is in the menu bar of the display it's on.
     static var isMouseInMenuBar: Bool {
         let point = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else { return false }
-        return screen.frame.maxY - point.y <= menuBarHeight(of: screen) + 1
+        return screen.frame.maxY - point.y <= Displays.menuBarHeight(of: screen) + 1
     }
 
-    /// Whether a menu or popover hangs from the menu bar: some other app's
-    /// floating window whose top edge sits just below the bar.
+    /// Whether a menu or popover hangs from a menu bar: some other app's
+    /// floating window whose top edge sits just below the bar of its display.
     static var isMenuOpen: Bool {
         guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]] else { return false }
         let ownPID = ProcessInfo.processInfo.processIdentifier
+        let displays = NSScreen.screens.map { CGDisplayBounds(Displays.id(of: $0)) }
         return windows.contains { window in
             guard
                 let layer = window[kCGWindowLayer as String] as? Int, layer > 0,
@@ -342,7 +351,9 @@ enum MenuBarState {
                 let rect = CGRect(dictionaryRepresentation: bounds),
                 rect.height > 1
             else { return false }
-            return rect.minY >= 20 && rect.minY <= 60
+            guard let display = displays.first(where: { $0.contains(CGPoint(x: rect.midX, y: rect.minY)) }) else { return false }
+            let belowBar = rect.minY - display.minY
+            return belowBar >= 20 && belowBar <= 60
         }
     }
 }

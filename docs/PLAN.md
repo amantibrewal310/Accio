@@ -147,10 +147,14 @@ menu**, leaving the menu bar alone. ⌥ in the menu turns each row into a second
 click when an app shows nothing, like Passwords); Apple's items are shown for a moment (added to the allow-list, or shown alone when they
 don't fit), clicked, and hidden again once their menu closes. Optional triggers: resting the pointer on
 empty menu bar space, and swiping down/up on the menu bar. Keyboard navigation, VoiceOver and dismissal
-come with the system menu. Main display only for now.
+come with the system menu.
 
-Not done: multi-display (Accio only manages the main display's menu bar so far), and per-item titles
-in the menu (apps with several items get numbered rows with the same icon).
+Multi-display: macOS 27 draws every status item on each display's bar (spikes "Multiple displays").
+Discovery, layout and reordering use the main display's bar; showing items, the hidden items menu,
+notch overflow, hover and swipe use the bar of the display under the pointer. Unsigned builds draw a
+stand-in icon on each display, and items are opened by clicking them on the user's display (a press
+would open the menu on the main one). Apps with several items are told apart by the titles they give
+them in AX ("Stats – CPU"), numbered when they give none.
 
 Original plan:
 - Borderless, non-activating `NSPanel` below the menu bar, aligned to the Accio icon or screen edge (setting).

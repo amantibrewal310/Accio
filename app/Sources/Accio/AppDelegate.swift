@@ -4,8 +4,8 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKey: HotKey?
-    /// Stands in for the status item when the build can't keep it visible.
-    private var standIn: StandInIcon?
+    /// Stand-ins for the status item when the build can't keep it visible.
+    private var standIn: StandInIcons?
     private let controller = VisibilityController.shared
     private let preferences = Preferences.shared
     private let itemsMenu = HiddenItemsMenu.shared
@@ -37,15 +37,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         triggers.onHover = { [weak self] in self?.showItems() }
         triggers.onScroll = { [weak self] down in down ? self?.showItems() : self?.hideItems() }
         if !MenuBarHider.keepsOwnIconVisible {
-            let standIn = StandInIcon()
-            standIn.onClick = { [weak self] flags in self?.handleClick(flags, isRightClick: false) }
-            standIn.onMenu = { [weak self] _ in self?.showMenu() }
-            standIn.staysVisible = { [controller] item in controller.staysVisible(item) }
-            self.standIn = standIn
             let presence = MenuBarPresence.shared
-            presence.onChange = { [weak self] shown in self?.standIn?.isMenuBarShown = shown }
+            presence.onChange = { [weak self] display, shown in self?.standIn?.setMenuBarShown(shown, on: display) }
             presence.start()
-            standIn.isMenuBarShown = presence.isShown
+            let standIn = StandInIcons()
+            standIn.onClick = { [weak self] flags in self?.handleClick(flags, isRightClick: false) }
+            standIn.onMenu = { [weak self] in self?.showMenu() }
+            standIn.staysVisible = { [controller] item in controller.staysVisible(item) }
+            ItemOpener.shared.onClickSlot = { [weak standIn] slot in standIn?.makeRoom(for: slot) }
+            self.standIn = standIn
             controller.onHidingChange = { [weak self] hiding in
                 guard let self else { return }
                 self.standIn?.setVisible(hiding, image: self.statusItem?.button?.image)
@@ -174,12 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Pop `menu` up from Accio's icon: the stand-in while it's shown, else
     /// the status item. Returns once the menu has closed.
     private func popUp(_ menu: NSMenu) {
-        if let standIn, let view = standIn.anchorView {
-            standIn.isHighlighted = true
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.minY - 4), in: view)
-            standIn.isHighlighted = false
-            return
-        }
+        if let standIn, standIn.popUp(menu) { return }
         // Attach the menu for this click only, so left-click keeps toggling.
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
