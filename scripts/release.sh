@@ -40,7 +40,7 @@ gh release create "$TAG" "$ZIP" --repo "$REPO" --title "Accio $VERSION" \
 brew install --cask amantibrewal310/tap/accio
 \`\`\`
 
-Accio isn't notarized, so macOS blocks the first launch: open it once, then click **Open Anyway** in System Settings → Privacy & Security."
+Accio isn't notarized. Homebrew lifts the download quarantine so it opens normally; if you download the zip yourself, macOS blocks the first launch: open it once, then click **Open Anyway** in System Settings → Privacy & Security."
 
 echo "🍺 Updating the Homebrew tap..."
 TAP_DIR="$(mktemp -d)"

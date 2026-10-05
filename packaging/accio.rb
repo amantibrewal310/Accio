@@ -12,15 +12,20 @@ cask "accio" do
 
   app "Accio.app"
 
+  # Accio isn't notarized (no paid Apple developer account), so Gatekeeper
+  # would refuse to open it, saying it can't check it for malware. Installing
+  # with Homebrew is the user's go-ahead, so lift the download quarantine.
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Accio.app"]
+  end
+
   uninstall quit: "com.accio.app"
 
   zap trash: "~/Library/Preferences/com.accio.app.plist"
 
   caveats <<~EOS
-    Accio isn't notarized by Apple, so macOS blocks its first launch:
-      1. Open Accio from Applications.
-      2. In System Settings → Privacy & Security, click "Open Anyway".
-    Accio then asks for Accessibility access, which it uses to see and arrange
-    your menu bar items.
+    Accio asks for Accessibility access on first launch, which it uses to see
+    and arrange your menu bar items.
   EOS
 end
