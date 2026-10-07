@@ -15,9 +15,10 @@ cask "accio" do
   # Accio isn't notarized (no paid Apple developer account), so Gatekeeper
   # would refuse to open it, saying it can't check it for malware. Installing
   # with Homebrew is the user's go-ahead, so lift the download quarantine.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Accio.app"]
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:           ["-dr", "com.apple.quarantine", "{{appdir}}/Accio.app"],
+        writable_paths: ["{{appdir}}/Accio.app"]
   end
 
   uninstall quit: "com.accio.app"
