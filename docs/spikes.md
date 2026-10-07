@@ -113,6 +113,9 @@ Results, verified with screenshots:
   system items** (clock, Wi-Fi, battery, Control Center). `invalidate` restores everything.
 - Items fade out/in with a system animation (~1 s); this looks native.
 - **Crash-safe:** killing the process without `invalidate` restored every item within 2 s.
+- **Windows unaffected:** Mission Control lists the same windows with and without an active assertion
+  (tested in Phase 5). Its "No Available Windows" only means the current Space has no windows, e.g. when
+  every app is in its own full-screen Space.
 - System items are allowed by `NSNumber` ID; see 1c for the mapping.
 
 Limitations:

@@ -127,8 +127,10 @@ final class StandInIcon {
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
         // On every Space, full-screen ones too: there it shows while the menu
-        // bar slides down (`isMenuBarShown`).
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // bar slides down (`isMenuBarShown`). Transient, not stationary:
+        // Mission Control hides the real menu bar, so the icon must go too
+        // instead of floating over the Spaces bar.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
 
         button = StandInButton()
         // So its alpha can fade with an auto-hiding menu bar.
